@@ -7,11 +7,15 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, PutCommand } from "@aws-sdk/lib-dynamodb";
 import crypto from "crypto";
 import { useSession } from "./userSessions.js";
+import { createAudioSession } from "./audioSessions.js";
 
 dotenv.config(); // load .env variables
 
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: true,
+  credentials: true,
+})); // CHANGE ORIGIN WHEN PRODUCTION FOR SECURITY
 
 useSession(app);
 
@@ -72,6 +76,16 @@ app.post("/upload", upload.single("file"), async (req, res) => {
     res.status(500).json({ message: "Failed to upload file", error: err.message });
   }
 });
+
+app.post("/createSession", async (req, res) => {
+  const userSessionId = req.cookies["usid"];
+
+  if (!userSessionId) {
+      return res.status(401).json({ error: "No user session cookie found" });
+  }
+
+  createAudioSession(userSessionId);
+})
 
 app.get("/", (req, res) => {
   res.send("✅ Session middleware working!");

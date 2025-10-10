@@ -75,16 +75,15 @@ const VoiceRecorder: React.FC = () => {
 
   const startSession = async() => 
   {
-    const testId = 123
 
     const uploadResponse = await fetch("http://localhost:5000/createSession", 
     {
       method: "POST",
+      credentials: "include",
       headers: 
         {
       "Content-Type": "application/json",
         },
-      body: JSON.stringify({ text: testId }), // send the string inside JSON
     })
 
     if (!uploadResponse.ok) {

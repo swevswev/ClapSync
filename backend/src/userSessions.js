@@ -24,7 +24,7 @@ const COOKIE_OPTIONS = {
 
 const COOKIE_LIFESPAN = 30;
 
-async function createSession(sessionId = crypto.randomUUID(), initialData = {})
+async function createSession(sessionId = crypto.randomUUID(), initialData = {"audio-session-id": ""})
 {
     const time = new Date().toISOString();
     const timeToLive = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * COOKIE_LIFESPAN;
@@ -129,6 +129,10 @@ function asyncHandler(fn) {
   };
 }
 
+export function getUserSession(userId)
+{
+    return getSession(userId);
+}
 
 export function useSession(app) {
   app.use(cookieParser());
