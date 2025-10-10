@@ -2,6 +2,9 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { getUserSession } from "./userSessions.js";
 import crypto from "crypto";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 const ddbClient = new DynamoDBClient({
   region: process.env.AWS_REGION,
@@ -17,20 +20,19 @@ async function createSession(userId)
 {
     //check if userId is a valid account userId function
     const time = new Date().toISOString();
-    console.log(userId);
+    
     let audioSessionId = await getSessionIdFromUser(userId);
-    console.log(audioSessionId);
+    
     if (audioSessionId) return null;
 
     audioSessionId = crypto.randomUUID();
-
-    console.log(audioSessionId, "SUS");
 
     const item =
     {
         "audio-session-id": audioSessionId,
         "collaborators": {},
         "owner": userId,
+        "videoIds": {},
         "creation-time": time,
         "status": "initialized"
     }
@@ -58,6 +60,55 @@ async function createSession(userId)
     return audioSessionId;
 }
 
+async function joinSession(userId, audioSessionId)
+{
+    const session = await getSession(audioSessionId);
+    if (!session?.Item) return null;
+
+    const currentUserSession = await getSessionIdFromUser(userId)
+    if (currentUserSession)
+    {
+        console.log("ALREADY IN A SESSION");
+
+        //just link them back towards that session
+        return null
+    }
+
+    const collaboratorCount = Object.keys(session.collaborators || {}).length;
+    const maxUsers = Number(process.env.AUDIO_SESSION_USER_SIZE);
+
+    console.log(collaboratorCount, maxUsers);
+
+    if (collaboratorCount >= (maxUsers - 1)) return null;
+    if (session.collaborators?.[userId]) return null;
+
+    try
+    {
+        await ddb.send(
+            new UpdateCommand({
+                TableName: process.env.AUDIO_SESSION_TABLE_NAME,
+                Key: {"audio-session-id": audioSessionId},
+                UpdateExpression: "SET collaborators.#uid = :data",
+                ExpressionAttributeNames: {
+                    "#uid": userId, 
+                },
+                ExpressionAttributeValues: {
+                ":data": { joinedAt: new Date().toISOString() }, // metadata for this user
+                },
+            })
+        )
+
+        setAudioSessionId(userId, audioSessionId);
+        //signal join to the session
+    }
+    catch (err)
+    {
+        console.log("Failed to join session:", err);
+    }
+
+}
+
+
 //Get sessionId if user has one active
 async function getSessionIdFromUser(userId)
 {
@@ -73,7 +124,7 @@ async function getSessionIdFromUser(userId)
 
 async function getSession(sessionId)
 {
-    if (!sessionid) return null;
+    if (!sessionId) return null;
     try
     {
         const result = await ddb.send(
@@ -118,4 +169,10 @@ export function createAudioSession(userId)
 {
     console.log("CREATING");
     return createSession(userId);
+}
+
+export function joinAudioSession(userId, sessionId)
+{
+    console.log("JOINING");
+    return joinSession(userId, "54205874-be5a-4ade-b66e-dc90ee532dcf")
 }

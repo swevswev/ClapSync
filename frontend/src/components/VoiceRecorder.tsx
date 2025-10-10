@@ -91,7 +91,28 @@ const VoiceRecorder: React.FC = () => {
     }
 
       const data = await uploadResponse.json();
-      console.log("Upload successful:", data);
+      console.log("create session successful:", data);
+  }
+
+const joinSession = async() => 
+  {
+
+    const uploadResponse = await fetch("http://localhost:5000/joinSession", 
+    {
+      method: "POST",
+      credentials: "include",
+      headers: 
+        {
+      "Content-Type": "application/json",
+        },
+    })
+
+    if (!uploadResponse.ok) {
+      throw new Error("Join session failed");
+    }
+
+      const data = await uploadResponse.json();
+      console.log("Join session successful:", data);
   }
 
 
@@ -140,6 +161,7 @@ const VoiceRecorder: React.FC = () => {
         )}
 
         <button onClick = {startSession} className="inline-block mt-3 px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg"> create session </button>
+        <button onClick = {joinSession} className="inline-block mt-3 px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg"> join session </button>
       </div>
     </div>
   );

@@ -7,7 +7,7 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, PutCommand } from "@aws-sdk/lib-dynamodb";
 import crypto from "crypto";
 import { useSession } from "./userSessions.js";
-import { createAudioSession } from "./audioSessions.js";
+import { createAudioSession, joinAudioSession } from "./audioSessions.js";
 
 dotenv.config(); // load .env variables
 
@@ -85,6 +85,15 @@ app.post("/createSession", async (req, res) => {
   }
 
   createAudioSession(userSessionId);
+})
+
+app.post("/joinSession", async (req, res) => {
+  const userSessionId = req.cookies["usid"];
+  if (!userSessionId) {
+      return res.status(401).json({ error: "No user session cookie found" });
+  }
+
+  joinAudioSession(userSessionId);
 })
 
 app.get("/", (req, res) => {
