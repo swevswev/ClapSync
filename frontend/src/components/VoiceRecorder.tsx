@@ -92,6 +92,18 @@ const VoiceRecorder: React.FC = () => {
 
       const data = await uploadResponse.json();
       console.log("create session successful:", data);
+
+      const sessionId = data.sessionId;
+    if (!sessionId) {
+      throw new Error("No sessionId returned from server");
+    }
+
+    // Now connect to the WebSocket for this session
+    const socket = new WebSocket(`ws://localhost:5000/session/${sessionId}/ws`);
+
+    socket.onopen = () => {
+      console.log("🔌 Connected to session WebSocket!");
+    };
   }
 
 const joinSession = async() => 

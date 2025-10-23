@@ -14,4 +14,4 @@ COPY src ./src
 EXPOSE 5000
 
 # Run your backend
-CMD ["node", "src/index.js"]
+CMD ["node", "src/app.js"]
