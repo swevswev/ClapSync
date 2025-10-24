@@ -7,6 +7,7 @@ import { WebSocketServer } from "ws";
 import app from "./app.js";
 import { activeSessions } from "./websocket.js";
 import { ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 dotenv.config();
 
@@ -149,24 +150,22 @@ async function uploadFileToSession(name, sessionId, file, duration)
         const command = new PutObjectCommand({
             Bucket: process.env.S3_BUCKET_NAME,
             Key: fileKey,
-            Body: file.buffer,
-            ContentType: file.mimetype,
+            ContentType: "video/webm",
             Metadata:
             {
                 uploaderName: name,
-                duration: duration
+                duration: duration || "unkown"
             }
         });
 
-        await s3.send(command);
-        
+        const url = await getSignedUrl(s3, command, { expiresIn: 60 }); // 60 seconds
+        return url;
     }
     catch(err)
     {
         console.error("Failed to upload file  to session", err)
-        return { success: false, error: err.message}
+        return null;
     }
-
 }
 
 async function listObjectsFromS3(sessionId)
@@ -185,8 +184,21 @@ async function listObjectsFromS3(sessionId)
 
         for (const obj of objects)
         {
+            const head = await s3.send(new HeadObjectCommand({
+                Bucket: process.env.S3_BUCKET_NAME,
+                Key: obj.Key
+            }));
 
+            result.push
+            ({
+                filename: obj.Key,
+                uploader: head.Metadata?.uploaderName,
+                duration: head.Metadata?.duration,
+                size: obj.Size
+            })
         }
+
+        return result;
     }
     catch (err)
     {
@@ -203,6 +215,8 @@ async function getSessionFiles(userId)
     if(session.Item.owner != userId) return null;
 
     const s3Objects = await listObjectsFromS3(sessionId);
+
+    return s3Objects;
 }
 
 

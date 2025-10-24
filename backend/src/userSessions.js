@@ -24,7 +24,7 @@ const COOKIE_OPTIONS = {
 
 const COOKIE_LIFESPAN = 30;
 
-async function createSession(sessionId = crypto.randomUUID(), initialData = {"audio-session-id": ""})
+async function createSession(sessionId = crypto.randomUUID(), userId, initialData = {"audio-session-id": ""})
 {
     const time = new Date().toISOString();
     const timeToLive = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * COOKIE_LIFESPAN;
@@ -36,6 +36,7 @@ async function createSession(sessionId = crypto.randomUUID(), initialData = {"au
         lastSeen: time,
         data: initialData,
         timeToLive: timeToLive,
+        userId: userId || null
     }
 
     try
@@ -132,6 +133,11 @@ function asyncHandler(fn) {
 export function getUserSession(userId)
 {
     return getSession(userId);
+}
+
+export function createUserSession(undefined, userId)
+{
+    return createSession(undefined, userId)
 }
 
 export function useSession(app) {
