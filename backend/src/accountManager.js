@@ -67,7 +67,6 @@ async function verifyUsername(username){
 }
 
 async function createAccount(username, email, password){
-    console.log("hi mason!");
     if(await verifyEmail(email) === false){
         return false;
     }
@@ -78,19 +77,12 @@ async function createAccount(username, email, password){
         return false;
     }
 
-    console.log("hi mason!");
-
     if(await findEmail(email)){
         return false;
     }
 
-    console.log("hi mason!2");
-
     const userId = crypto.randomUUID();
     const sessionId = await createUserSession(undefined, userId);
-    
-
-    console.log("hi mason!3");
 
     const saltRounds = 10;
     const hashPassword = await bcrypt.hash(password, saltRounds);
