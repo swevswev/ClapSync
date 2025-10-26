@@ -52,11 +52,11 @@ async function verifyPassword(password){
 }
 
 async function verifyUsername(username){
-    const minlength = 8;
+    const minlength = 3;
     const maxlength = 64;
     const regex = /[/\:.]/
 
-    if(username.length < 8 || username.length > 64){
+    if(username.length < minlength || username.length > maxlength){
         return false;
     }
     else if(regex.test(username) === true){
@@ -82,7 +82,7 @@ async function createAccount(username, email, password){
     }
 
     const userId = crypto.randomUUID();
-    const sessionId = await createUserSession(undefined, userId);
+    const sessionId = await createUserSession(undefined, userId, username);
 
     const saltRounds = 10;
     const hashPassword = await bcrypt.hash(password, saltRounds);
@@ -110,4 +110,9 @@ async function createAccount(username, email, password){
     catch(err){
         console.error('Error hashing password:', err);
     }
+}
+
+export function validateUserName(username)
+{
+    return verifyUsername;
 }

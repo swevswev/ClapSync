@@ -1,10 +1,13 @@
 import { WebSocketServer } from "ws";
 import { parse } from "url";
 import cookie from "cookie";
-import { getUserSession } from "./userSessions.js";
+import { getUserNameFromSession, getUserSession } from "./userSessions.js";
 import { getAudioSession } from "./audioSessionManager.js";
+import {v4 as uuidv4} from "uuid";
 
 export const activeSessions = new Map();
+
+const recordingBuffer = 10000 //10 secs
 
 export function setupWebSocket(server) 
 {
@@ -25,18 +28,18 @@ export function setupWebSocket(server)
         return;
       }
 
-      //verify userId cookie and valid user session
+      //verify userSessionId cookie and valid user session
       const audioSessionId = match[1];
       const cookies = cookie.parse(req.headers.cookie || "");
-      const userId = cookies["usid"];
-      if (!userId || !audioSessionId)
+      const userSessionId = cookies["usid"];
+      if (!userSessionId || !audioSessionId)
       {
         console.warn("NO SESSION COOKIE/SESSION ID")
         socket.destroy();
         return;
       }
     
-      const userSession = await(getUserSession(userId));
+      const userSession = await(getUserSession(userSessionId));
       if (!userSession)
       {
         console.warn("INVALID SESSION COOKIE")
@@ -54,7 +57,7 @@ export function setupWebSocket(server)
 
       //Allow connection to websocket
       wss.handleUpgrade(req, socket, head, (ws) => {
-      wss.emit("connection", ws, req, audioSessionId, userId);
+      wss.emit("connection", ws, req, audioSessionId, userSessionId);
       });
     }
     catch(err)
@@ -66,24 +69,120 @@ export function setupWebSocket(server)
   });
 
   /**
+   * Idk what to call it, function block for websocket
+   */
+  const handleMessage = 
+  {
+    startRecording: (data, ws, sessionData, userSessionId) =>
+    {
+      if (userSessionId != sessionData.owner)
+        return;
+
+      const time = performance.now() + recordingBuffer;
+
+      for (const [usid, socket] of sessionData.sockets.entries())
+      {
+        if (socket.readyState === ws.OPEN)
+        {
+          socket.send(JSON.stringify({type: "startRecording", time}));
+        }
+      }
+    },
+
+    pauseRecording: (data, ws, sessionData, userSessionId) =>
+    {
+      if (userSessionId != sessionData.owner)
+        return;
+
+      for (const [usid, socket] of sessionData.sockets.entries())
+      {
+        if (socket.readyState === ws.OPEN)
+        {
+          socket.send(JSON.stringify({type: "pauseRecording", time}));
+        }
+      }
+    },
+
+    stopRecording: (data, ws, sessionData, userSessionId) =>
+    {
+      if (userSessionId != sessionData.owner)
+        return;
+
+      for (const [usid, socket] of sessionData.sockets.entries())
+      {
+        if (socket.readyState === ws.OPEN)
+        {
+          socket.send(JSON.stringify({type: "stopRecording", time}));
+        }
+      }
+    },
+
+    ping: (data, ws) =>
+    {
+      ws.send(JSON.stringify({type: "pong", time: performance.now(), clientTime: data.clientTime}));
+    },
+
+    micLevel: (data, ws, sessionData, userSessionId) =>
+    {
+      for (const [usid, socket] of sessionData.sockets.entries())
+      {
+        if (socket !== ws && socket.readyState === ws.OPEN) {
+          socket.send(JSON.stringify({ type: "updateMicLevel", localId: sessionData.localIds.get(userSessionId), db: data.db }));
+        }
+      }
+    },
+
+    changeIcon: (data, ws, sessionData, userSessionId) =>
+    {
+      for (const [usid, socket] of sessionData.sockets.entries())
+      {
+        if (socket !== ws && socket.readyState === ws.OPEN) {
+          socket.send(JSON.stringify({ type: "changeIcon", localId: sessionData.localIds.get(userSessionId), icon: data.icon }));
+        }
+      }
+    }
+  }
+
+
+  /**
    * Each session's socket logic
    */
-  wss.on("connection", (ws, req, audioSessionId, userId) => {
-    console.log(`✅ WebSocket connected: user ${userId} joined session ${audioSessionId}`);
+  wss.on("connection", (ws, req, audioSessionId, userSessionId) => {
+    console.log(`✅ WebSocket connected: user ${userSessionId} joined session ${audioSessionId}`);
     if (!activeSessions.has(audioSessionId))
     {
         const sessionData =
         {
-            owner: userId,
+            owner: userSessionId,
             sockets: new Map(),
+            users: new Map(),
+            localIds: new Map(),
         }
         activeSessions.set(audioSessionId, sessionData);
     }
 
     const sessionData = activeSessions.get(audioSessionId);
-    sessionData.sockets.set(userId, ws);
+    sessionData.sockets.set(userSessionId, ws);
 
+    const userName = getUserNameFromSession(userSessionId) || "unknown";
+    sessionData.users.set(userSessionId, userName);
     
+    const localId = uuidv4();
+    sessionData.localIds.set(userSessionId, localId)
+
+    for (const [usid, socket] of sessionData.sockets.entries())
+      {
+        if (socket !== ws && socket.readyState === ws.OPEN) {
+          socket.send(JSON.stringify({ type: "join", userName: userName, localId: localId}));
+        }
+      }
+
+    ws.on("message", (message) => {
+      const data = JSON.parse(message);
+      const type = data.type
+      
+      handleMessage[type](data, ws, sessionData, userSessionId);
+    });
   });
 
 }
