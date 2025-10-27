@@ -2,7 +2,7 @@ import { WebSocketServer } from "ws";
 import { parse } from "url";
 import cookie from "cookie";
 import { getUserNameFromSession, getUserSession } from "./userSessions.js";
-import { getAudioSession } from "./audioSessionManager.js";
+import { getAudioSession, removeFromAudioSession } from "./audioSessionManager.js";
 import {v4 as uuidv4} from "uuid";
 
 export const activeSessions = new Map();
@@ -117,6 +117,25 @@ export function setupWebSocket(server)
       }
     },
 
+    kickUser: (data, ws, sessionData, userSessionId) =>
+    {
+      if (userSessionId != sessionData.owner)
+        return null;
+
+      const localId = data.localId
+      let kickedUserSessionId;
+      for (const [usid, lid] of sessionData.localIds.entries())
+      {
+        if (lid == localId)
+          kickedUserId = usid;
+      }
+
+      if (!kickedUserSessionId || kickedUserSessionId == userSessionId)
+        return null;
+
+      removeFromAudioSession(kickedUserSessionId, "kicked");
+    },
+
     ping: (data, ws) =>
     {
       ws.send(JSON.stringify({type: "pong", time: performance.now(), clientTime: data.clientTime}));
@@ -183,6 +202,10 @@ export function setupWebSocket(server)
       
       handleMessage[type](data, ws, sessionData, userSessionId);
     });
+
+    ws.on("close", () => {
+      removeFromAudioSession(audioSessionId, "disconnect");
+    })
   });
 
 }
