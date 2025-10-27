@@ -405,7 +405,7 @@ async function closeSession(audioSessionId)
 }
 
 
-//testing purposes
+//exported functions
 export function createAudioSession(userSessionId)
 {
     return createSession(userSessionId);
