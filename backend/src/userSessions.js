@@ -24,7 +24,7 @@ const COOKIE_OPTIONS = {
 
 const COOKIE_LIFESPAN = 30;
 
-async function createSession(sessionId = crypto.randomUUID(), userId, initialData = {"audio-session-id": ""})
+async function createSession(sessionId = crypto.randomUUID(), userId, userName)
 {
     const time = new Date().toISOString();
     const timeToLive = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * COOKIE_LIFESPAN;
@@ -34,9 +34,10 @@ async function createSession(sessionId = crypto.randomUUID(), userId, initialDat
         "user-session-id": sessionId,
         createdAt: time,
         lastSeen: time,
-        data: initialData,
+        audioSessionId: "",
         timeToLive: timeToLive,
-        userId: userId || null
+        userId: userId || null,
+        userName: userName || null,
     }
 
     try
@@ -74,6 +75,22 @@ async function getSession(sessionId)
     catch (err)
     {
         console.log("Couldn't Get Session", err)
+    }
+}
+
+async function getUserName(sessionId)
+{
+        if (!sessionId) return null;
+    try
+    {
+        const result = await ddb.send(
+            new GetCommand({TableName: SESSIONS_TABLE, Key: {"user-session-id": sessionId},})
+        )
+        return result.Item?.userName;
+    }
+    catch (err)
+    {
+        console.log("Couldn't Get Name", err)
     }
 }
 
@@ -130,14 +147,19 @@ function asyncHandler(fn) {
   };
 }
 
-export function getUserSession(userId)
+export function getUserSession(userSessionId)
 {
-    return getSession(userId);
+    return getSession(userSessionId);
 }
 
-export function createUserSession(undefined, userId)
+export function createUserSession(undefined, userId, userName)
 {
-    return createSession(undefined, userId)
+    return createSession(undefined, userId, userName)
+}
+
+export function getUserNameFromSession(userSessionId)
+{
+    return getUserName(userSessionId)
 }
 
 export function useSession(app) {

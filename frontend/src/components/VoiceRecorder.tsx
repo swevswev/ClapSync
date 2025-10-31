@@ -103,7 +103,18 @@ const VoiceRecorder: React.FC = () => {
 
     socket.onopen = () => {
       console.log("🔌 Connected to session WebSocket!");
+
+      socket.send(JSON.stringify({type: "ping", clientTime: Date.now()}))
     };
+
+    socket.onmessage = (event) => 
+    {
+       const data = JSON.parse(event.data);
+
+      if (data.type === "pong") {
+        console.log("📡 Received ping from server:", data);
+      }
+    }
   }
 
 const joinSession = async() => 
