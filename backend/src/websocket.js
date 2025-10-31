@@ -78,13 +78,13 @@ export function setupWebSocket(server)
       if (userSessionId != sessionData.owner)
         return;
 
-      const time = performance.now() + recordingBuffer;
+      const time = Date.now() + recordingBuffer;
 
       for (const [usid, socket] of sessionData.sockets.entries())
       {
         if (socket.readyState === ws.OPEN)
         {
-          socket.send(JSON.stringify({type: "startRecording", time}));
+          socket.send(JSON.stringify({type: "startRecording", time: Date.now()}));
         }
       }
     },
@@ -98,7 +98,7 @@ export function setupWebSocket(server)
       {
         if (socket.readyState === ws.OPEN)
         {
-          socket.send(JSON.stringify({type: "pauseRecording", time}));
+          socket.send(JSON.stringify({type: "pauseRecording", time: Date.now()}));
         }
       }
     },
@@ -127,10 +127,10 @@ export function setupWebSocket(server)
       for (const [usid, lid] of sessionData.localIds.entries())
       {
         if (lid == localId)
-          kickedUserId = usid;
+          kickedUserSessionId = usid;
       }
 
-      if (!kickedUserSessionId || kickedUserSessionId == userSessionId)
+      if (!kickedUserSessionId || kickedUserSessionId === userSessionId)
         return null;
 
       removeFromAudioSession(kickedUserSessionId, "kicked");
@@ -138,7 +138,8 @@ export function setupWebSocket(server)
 
     ping: (data, ws) =>
     {
-      ws.send(JSON.stringify({type: "pong", time: performance.now(), clientTime: data.clientTime}));
+      console.log("PINGED");
+      ws.send(JSON.stringify({type: "pong", time: Date.now(), clientTime: data.clientTime}));
     },
 
     micLevel: (data, ws, sessionData, userSessionId) =>
@@ -187,7 +188,14 @@ export function setupWebSocket(server)
     sessionData.users.set(userSessionId, userName);
     
     const localId = uuidv4();
-    sessionData.localIds.set(userSessionId, localId)
+    sessionData.localIds.set(userSessionId, localId);
+
+    const currentUserMap = {};
+    for (const [userSessionId, localId] of sessionData.localIds.entries()) {
+        currentUserMap[localId] = sessionData.users.get(userSessionId) || "unknown";
+    }
+
+    ws.send(JSON.stringify({type: "setup", users: currentUserMap, self: localId}));
 
     for (const [usid, socket] of sessionData.sockets.entries())
       {
@@ -200,7 +208,10 @@ export function setupWebSocket(server)
       const data = JSON.parse(message);
       const type = data.type
       
-      handleMessage[type](data, ws, sessionData, userSessionId);
+      if(handleMessage[type])
+        handleMessage[type](data, ws, sessionData, userSessionId);
+      else
+        console.warn("Unknown message type: ", type);
     });
 
     ws.on("close", () => {
