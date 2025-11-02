@@ -1,6 +1,6 @@
 import cookieParser from "cookie-parser";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand, DeleteCommand } from "@aws-sdk/lib-dynamodb";
 import crypto from "crypto";
 
 const ddbClient = new DynamoDBClient({
@@ -115,6 +115,16 @@ async function updateSession(sessionId)
     {
         console.log("Error updating session", err)
     }
+}
+
+export async function deleteSession(sessionId){
+    await ddb.send(
+        new DeleteCommand({
+            TableName: SESSIONS_TABLE,
+            Key: {"user-session-id": sessionId },
+    }));
+
+    return true;
 }
 
 async function sessionHandler(req, res, next)

@@ -1,13 +1,13 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, QueryCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
-import crypto from "crypto";
+import { DynamoDBDocumentClient, QueryCommand, PutCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import crypto, { verify } from "crypto";
 import { createUserSession } from "./userSessions.js";
-import { create } from "domain";
+import { deleteSession } from "./userSessions.js";
 import bcrypt from "bcrypt";
 
 const ddbClient = new DynamoDBClient({ region: process.env.AWS_REGION });
 const ddb = DynamoDBDocumentClient.from(ddbClient);
-
+const USER_TABLE = process.env.USER_TABLE_NAME
 
 async function verifyEmail(email){
     const regex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
@@ -37,15 +37,13 @@ async function findEmail(email){
         console.error("An error has occured:", err.message);
         return false;
     }
-
-    return false;
 }
 
 async function verifyPassword(password){
-    const minlength = 8;
-    const maxlength = 64;
+    const minLength = 8;
+    const maxLength = 64;
 
-    if(password.length < 8 || password.length > 64){
+    if(password.length < minLength || password.length > maxLength){
         return false;
     }
     return true;
@@ -66,20 +64,11 @@ async function verifyUsername(username){
     return true;
 }
 
-async function createAccount(username, email, password){
-    if(await verifyEmail(email) === false){
-        return false;
-    }
-    else if(await verifyPassword(password) === false){
-        return false;
-    }
-    else if(await verifyUsername(username) === false){
-        return false;
-    }
+export async function createAccount(username, email, password){
 
-    if(await findEmail(email)){
-        return false;
-    }
+    if(!(await verifyUsername(username)) || !(await verifyPassword(password)) || !(await verifyEmail(email))){ return false; }
+
+    if(await findEmail(email)){ return false; }
 
     const userId = crypto.randomUUID();
     const sessionId = await createUserSession(undefined, userId, username);
@@ -96,8 +85,6 @@ async function createAccount(username, email, password){
         sessionId: sessionId
     }
 
-    const USER_TABLE = process.env.USER_TABLE_NAME
-
     try{
         await ddb.send(
             new PutCommand({
@@ -112,7 +99,68 @@ async function createAccount(username, email, password){
     }
 }
 
-export function validateUserName(username)
-{
+export async function login(email, password){
+    if(!(await verifyEmail(email)) || !(await verifyPassword(password))){ return false; }
+
+    try{
+        const findUser = new QueryCommand({
+            TableName: USER_TABLE,
+            IndexName: "email-index",       
+            KeyConditionExpression: "email = :e",
+            ExpressionAttributeValues: { ":e": email },
+            Limit: 1
+        });
+
+        const res = await ddb.send(findUser);
+        const user = res.Items?.[0];
+
+        if (!user){
+            return false;
+        }
+
+        const matchPassword = await bcrypt.compare(password, user.password);
+
+        if (!matchPassword){
+            return false;
+        }
+
+        const sessionId = await createUserSession(undefined, user["user-id"], user.username);
+
+        await ddb.send(
+            new UpdateCommand({
+                TableName: USER_TABLE,
+                Key: { "user-id": user["user-id"] },
+                UpdateExpression: "SET sessionId = :s",
+                ExpressionAttributeValues: { ":s": sessionId }
+        }));
+
+        return true;
+    }
+    catch(err){
+        console.error("login error: ", err);
+        return false;
+    }
+}
+
+export async function logout(sessionId, userId){
+    try{
+        await deleteSession(sessionId);
+
+        await ddb.send(
+            new UpdateCommand({
+                TableName: USER_TABLE,
+                Key: { "user-id": userId },
+                UpdateExpression: "REMOVE sessionId",
+            }));
+
+        return true;
+    }
+    catch (err){
+        console.error("logout error: ", err);
+        return false;
+    }
+}
+
+export function validateUserName(username) {
     return verifyUsername;
 }
