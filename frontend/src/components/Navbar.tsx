@@ -10,25 +10,81 @@ export default function Navbar() {
       <div className="flex justify-between items-center h-14 sm:h-16 md:h-20 pl-4 sm:pl-6 lg:pl-8 pr-4 sm:pr-6 lg:pr-8">
 
         {/** logo side */}
-        <div className="flex items-center space-x-4 group cursor-pointer">
+        <a href="/" className="flex items-center space-x-4 group cursor-pointer"
+        onClick={(e) => 
+          {
+            if (window.location.pathname === "/") 
+            {
+              e.preventDefault(); // prevent reload
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            }
+          }
+        }
+        >
           <img src={logo} alt="ClapSync" className="w-6 h-6 sm:w-8 sm:h-8 md:w-10 md:h-10" />
           <span className="text-lg sm:text-xl md:text-2xl font-semibold">
             <span className="text-white">Clap</span>
             <span className="text-blue-400">Sync</span>
           </span>
-        </div>
+        </a>
 
         {/** links side */}
         <div className="hidden md:flex items-center space-x-6 lg:space-x-8">
-          <a href="#features" className="text-gray-300 hover:text-white text-sm lg:text-base"
-            >Features
+
+          {/*About Us*/}
+          <a href="/about" className="text-gray-300 hover:text-white text-sm lg:text-base"
+              >About Us
           </a>
-          <a href="#about" className="text-gray-300 hover:text-white text-sm lg:text-base"
-            >About Us
+          
+          {/*FEATURES*/}
+          <a href="/#features" className="text-gray-300 hover:text-white text-sm lg:text-base"
+          onClick={(e) => 
+            {
+              if (window.location.pathname === "/") 
+              {
+                e.preventDefault(); // prevent reload
+                const section = document.querySelector("#features");
+                if (section) 
+                {
+                  section.scrollIntoView({ behavior: "smooth" });
+                }
+              }
+            }
+          }
+          >Features
           </a>
-          <a href="#pricing" className="text-gray-300 hover:text-white text-sm lg:text-base"
+
+          {/* PRICING */}
+          <a href="/#pricing" className="text-gray-300 hover:text-white text-sm lg:text-base"
+          onClick={(e) => 
+            {
+              if (window.location.pathname === "/") 
+              {
+                e.preventDefault(); // prevent reload
+                const section = document.querySelector("#pricing");
+                if (section) 
+                {
+                  section.scrollIntoView({ behavior: "smooth" });
+                }
+              }
+            }
+          }
             >Pricing
           </a>
+
+          {/* Login / Signup */}
+          <div className="flex space-x-2 items-center">
+            <a href="/login" className="text-gray-300 hover:text-white text-sm lg:text-base bg-white/20 px-1.5 rounded-md">
+              Login
+            </a>
+
+            <div className="bg-white rounded-md">
+              <a href="/signup" className=" hover:text-white text-sm lg:text-base bg-slate-900 bg-clip-text text-transparent px-1.5 rounded-md">
+                Sign Up
+              </a>
+            </div>
+          </div>
+
         </div>
 
         <button className="md:hidden p-2 text-gray-300 hover:text-white"
