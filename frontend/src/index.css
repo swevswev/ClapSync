@@ -24,6 +24,10 @@
         animation-duration: 1000ms;
     }
 
+    .duration-1500 {
+        animation-duration: 1500ms;
+    }
+
     .duration-2000
     {
         animation-duration: 2000ms;

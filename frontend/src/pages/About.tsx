@@ -1,3 +1,11 @@
+import Navbar from "../components/Navbar"
+import AboutComponent from "../components/AboutComponent"
+
 export default function About() {
-  return <div className="text-2xl font-bold">About Page</div>;
+  return (
+    <div className="min-h-screen bg-slate-900 text-white overflow-hidden">
+          <Navbar />
+          <AboutComponent />
+    </div>
+  );
 }
