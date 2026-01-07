@@ -7,20 +7,21 @@ import bcrypt from "bcrypt";
 
 const ddbClient = new DynamoDBClient({ region: process.env.AWS_REGION });
 const ddb = DynamoDBDocumentClient.from(ddbClient);
-const USER_TABLE = process.env.USER_TABLE_NAME
+const USER_TABLE = process.env.USER_TABLE_NAME;
+const saltRounds = 10;
 
-async function verifyEmail(email){
+export async function verifyEmail(email){
     const regex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
     return regex.test(email);
 }
 
-async function findEmail(email){
+export async function findEmail(email){
     const params = {
     TableName: process.env.USER_TABLE_NAME,
     IndexName: "email-index", // your GSI name
     KeyConditionExpression: "email = :email",
     ExpressionAttributeValues: {
-      ":email": email,
+      ":email": email.toLowerCase(),
     },
     };
 
@@ -39,7 +40,7 @@ async function findEmail(email){
     }
 }
 
-async function verifyPassword(password){
+export async function verifyPassword(password){
     const minLength = 8;
     const maxLength = 64;
 
@@ -49,9 +50,9 @@ async function verifyPassword(password){
     return true;
 }
 
-async function verifyUsername(username){
+export async function verifyUsername(username){
     const minlength = 3;
-    const maxlength = 64;
+    const maxlength = 32;
     const regex = /[/\:.]/
 
     if(username.length < minlength || username.length > maxlength){
@@ -64,23 +65,51 @@ async function verifyUsername(username){
     return true;
 }
 
+export async function checkUsername(username)
+{
+    console.log(username);
+    const params = {
+        TableName: process.env.USER_TABLE_NAME,
+        IndexName: "username-index", // your GSI name
+        KeyConditionExpression: "lowercaseUsername = :username",
+        ExpressionAttributeValues: {
+          ":username": username.toLowerCase(),
+        },
+    };
+
+    try {
+        const result = await ddb.send(new QueryCommand(params));
+        if(result.Count > 0){
+            return result;
+        }
+        else{
+            return false;
+        }
+    }
+    catch(err){
+        console.error("An error has occured:", err.message);
+        return false;
+    }
+}
+
 export async function createAccount(username, email, password){
 
-    if(!(await verifyUsername(username)) || !(await verifyPassword(password)) || !(await verifyEmail(email))){ return false; }
-
-    if(await findEmail(email)){ return false; }
+    /**
+     *     if(!(await verifyUsername(username)) || !(await verifyPassword(password)) || !(await verifyEmail(email))){ return false; }
+            if(await findEmail(email)){ return false; }
+     */
 
     const userId = crypto.randomUUID();
     const sessionId = await createUserSession(undefined, userId, username);
 
-    const saltRounds = 10;
     const hashPassword = await bcrypt.hash(password, saltRounds);
 
     const item =
     {
         "user-id": userId,
-        email: email,
+        email: email.toLowerCase(),
         username: username,
+        lowercaseUsername: username.toLowerCase(),
         password: hashPassword,
         sessionId: sessionId
     }
@@ -90,28 +119,36 @@ export async function createAccount(username, email, password){
             new PutCommand({
                 TableName: USER_TABLE,
                 Item: item,
-                ConditionExpression: "attribute_not_exists(sessionId)",
+                ConditionExpression: "attribute_not_exists(#uid)",
+                ExpressionAttributeNames:
+                {"#uid" : "user-id"}
             })
         );
+
+        return sessionId;
     }
     catch(err){
         console.error('Error hashing password:', err);
+        return false;
     }
 }
 
 export async function login(email, password){
-    if(!(await verifyEmail(email)) || !(await verifyPassword(password))){ return false; }
+    const normalizedEmail = email.toLowerCase()
+
+    if(!(await verifyEmail(normalizedEmail))) { return false; }
 
     try{
         const findUser = new QueryCommand({
             TableName: USER_TABLE,
             IndexName: "email-index",       
             KeyConditionExpression: "email = :e",
-            ExpressionAttributeValues: { ":e": email },
+            ExpressionAttributeValues: { ":e": normalizedEmail },
             Limit: 1
         });
 
         const res = await ddb.send(findUser);
+
         const user = res.Items?.[0];
 
         if (!user){
@@ -119,11 +156,10 @@ export async function login(email, password){
         }
 
         const matchPassword = await bcrypt.compare(password, user.password);
-
         if (!matchPassword){
             return false;
         }
-
+        
         const sessionId = await createUserSession(undefined, user["user-id"], user.username);
 
         await ddb.send(
@@ -134,7 +170,7 @@ export async function login(email, password){
                 ExpressionAttributeValues: { ":s": sessionId }
         }));
 
-        return true;
+        return sessionId;
     }
     catch(err){
         console.error("login error: ", err);

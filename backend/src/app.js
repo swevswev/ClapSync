@@ -6,20 +6,22 @@ import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, PutCommand } from "@aws-sdk/lib-dynamodb";
 import crypto from "crypto";
-import { useSession } from "./userSessions.js";
+import { getUserSession, useSession } from "./userSessions.js";
 import { createAudioSession, joinAudioSession } from "./audioSessionManager.js";
 import { setupWebSocket } from "./websocket.js";
 import http from "http";
+import { checkUsername, login, verifyEmail, verifyUsername, verifyPassword, findEmail, createAccount, logout } from "./accountManager.js";
+import cookieParser from "cookie-parser";
 
 dotenv.config(); // load .env variables
 
 const app = express();
+app.use(express.json());
 app.use(cors({
   origin: true,
   credentials: true,
 })); // CHANGE ORIGIN WHEN PRODUCTION FOR SECURITY
-
-useSession(app);
+app.use(cookieParser());
 
 export default app;
 
@@ -49,6 +51,17 @@ const ddbClient = new DynamoDBClient({
   },
 });
 const ddb = DynamoDBDocumentClient.from(ddbClient);
+
+const COOKIE_NAME = "usid";
+const COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: "lax",
+  maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
+  path: "/",
+};
+
+const COOKIE_LIFESPAN = 30;
 
 
 // Upload endpoint
@@ -98,7 +111,8 @@ app.post("/createSession", async (req, res) => {
   }
 })
 
-app.post("/joinSession", async (req, res) => {
+app.post("/joinSession", async (req, res) => 
+{
   const userSessionId = req.cookies["usid"];
   if (!userSessionId) {
       return res.status(401).json({ error: "No user session cookie found" });
@@ -106,6 +120,101 @@ app.post("/joinSession", async (req, res) => {
 
   joinAudioSession(userSessionId);
 })
+
+
+app.post("/auth/login", async (req,res) => 
+{
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ error: "Missing email or password" });
+  }
+
+  const sessionId = await login(email, password);
+  if (!sessionId) {
+    return res.status(401).json({ error: "Invalid email or password" });
+  }
+
+  res.cookie(COOKIE_NAME, sessionId, COOKIE_OPTIONS);
+  return res.status(200).json({ sessionId });
+
+});
+
+app.post("/auth/checkUsername", async (req,res) => 
+{
+  console.log("Checking username");
+  const { username } = req.body;
+  if(!username)
+    return res.status(400).json({ error: "Missing username" });
+  try 
+  {
+    const result = await checkUsername(username);
+    if (!result)
+      return res.status(200).json({ available: true });
+    else
+      return res.status(200).json({ available: false });
+  } 
+  catch (err) 
+  {
+    console.error("Error checking username:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.post("/auth/signup", async (req, res) =>
+{
+  console.log("Signing up");
+  const {username, email, password} = req.body;
+  const errors = [];
+
+  if(!(await verifyUsername(username)))
+      errors.push({errorType: "username", errorMessage: "Username must be between 3-32 characters in length and have no special characters"});
+  if(!(await verifyPassword(password)))
+      errors.push({errorType: "password", errorMessage: "Password must be between 8-64 characters in length"});
+  if(!(await verifyEmail(email)))
+      errors.push({errorType: "email", errorMessage: "Email must be a valid email"});
+  if(await findEmail(email))
+      errors.push({errorType: "email", errorMessage: "Email is already in use"});
+  if(await checkUsername(username))
+      errors.push({errorType: "username", errorMessage: "Username already exists"})
+  
+  if(errors.length > 0)
+    return res.status(400).json({
+      success: false,
+      errors,
+    });
+  
+  const result = await createAccount(username, email, password);
+  if (!result)
+  {
+    errors.push({errorType: "all", errorMessage: "Error creating account"})
+    return res.status(400).json({
+      success: false,
+      errors,
+    });
+  }
+    res.cookie(COOKIE_NAME, result, COOKIE_OPTIONS);
+    return res.status(200).json({ success: true, sessionId: result});
+});
+
+app.post("/logout", async (req, res) => 
+{
+  const userSessionId = req.cookies.usid;
+
+  if(!userSessionId)
+    return res.status(400).json({success: false, errorMessage: "Missing sessionId"});
+
+  const userSession = await getUserSession(userSessionId);
+  if(!userSession)
+    return res.status(400).json({success: false, errorMessage: "Session does not exist!"});
+
+  const result = await logout(userSessionId, userSession?.Item.userId);
+
+  if(result)
+    return res.status(200).json({success: true, errorMessage: "Successfully logged out"});
+  else
+    return res.status(400).json({success: false, errorMessage: "Log out failed"});
+
+});
 
 app.get("/", (req, res) => {
   res.send("✅ Session middleware working!");
