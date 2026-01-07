@@ -1,10 +1,41 @@
-import { Menu, X } from "lucide-react";
+import { LogOut, Menu, X } from "lucide-react";
 import logo from "../assets/cat.jpg";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 
 export default function Navbar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [loggedIn, setLoggedIn] = useState(localStorage.getItem("loggedIn") === "true");
+
+  const logout = async() =>
+  {
+
+    const res = await fetch("http://localhost:5000/logout",
+      {
+          method: "POST",
+          headers: {
+              "Content-Type": "application/json",
+            },
+          body: JSON.stringify({}),
+          credentials: "include",
+      });
+      const data = await res.json();
+      if(!data.success)
+        console.error("Logout failed", data.errorMessage);
+
+      localStorage.removeItem("loggedIn");
+      setLoggedIn(false);
+      console.log("LOG OUT SUCCESSFUL")
+  };
+
+  useEffect(()=>
+  {
+    const value = localStorage.getItem("loggedIn");
+    console.log("loggedIn from localStorage:", value);
+    setLoggedIn(localStorage.getItem("loggedIn") === "true");
+    console.log(loggedIn);
+  },[]);
+
   return (
     <nav className="fixed top-0 w-full z-50 transition-all duration-300 bg-slate-900/20 backdrop-blur-sm">
       <div className="flex justify-between items-center h-14 sm:h-16 md:h-20 pl-4 sm:pl-6 lg:pl-8 pr-4 sm:pr-6 lg:pr-8">
@@ -73,7 +104,16 @@ export default function Navbar() {
           </a>
 
           {/* Login / Signup */}
-          <div className="flex space-x-2 items-center">
+          {loggedIn ?
+          (
+            <button className="flex flex-row items-center space-x-1.5 group text-gray-300">
+              <span className="group-hover:text-white text-sm lg:text-base"
+              onClick={logout}> Logout </span>
+              <LogOut className="w-4 h-4 mt-1 group-hover:text-white"/>
+            </button>
+          )
+          :
+          (<div className="flex space-x-2 items-center">
             <a href="/login" className="text-gray-300 hover:text-white text-sm lg:text-base bg-white/20 px-1.5 rounded-md">
               Login
             </a>
@@ -83,7 +123,7 @@ export default function Navbar() {
                 Sign Up
               </a>
             </div>
-          </div>
+          </div>)}
 
         </div>
 

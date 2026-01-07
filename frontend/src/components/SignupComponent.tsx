@@ -1,8 +1,113 @@
+import { CircleAlert, LoaderCircle } from "lucide-react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+
+export type SignupError = {
+    errorType: "username" | "email" | "password";
+    errorMessage: string;
+};
 
 export default function SignupComponent()
 {
     const navigate = useNavigate(); 
+
+    const [username, setUsername] = useState("");
+    const [email, setEmail] = useState("");
+    const [password, setPassword] = useState("");
+
+    const [loading, setLoading] = useState(false);
+
+    const [usernameError, setUsernameError] = useState("");
+    const [emailError, setEmailError] = useState("");
+    const [passwordError, setPasswordError] = useState("");
+
+    const signup = async () =>
+    {
+        if(email === "" || password === "" || username === "")
+            return;
+        setLoading(true);
+        try
+        {
+            const res = await fetch("http://localhost:5000/auth/signup",
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                  },
+                credentials: "include",
+                body: JSON.stringify({ username, email, password }),
+            });
+            const data = await res.json();
+            setLoading(false);
+
+            if (!res.ok) {
+                if (data.errors && Array.isArray(data.errors))
+                {
+                    data.errors.forEach((err : SignupError) =>
+                    {
+                        switch (err.errorType)
+                        {
+                            case "username":
+                                setUsernameError(err.errorMessage);
+                                break;
+                            case "email":
+                                setEmailError(err.errorMessage);
+                                break;
+                            case "password":
+                                setPasswordError(err.errorMessage);
+                                break;
+                            default:
+                                setUsernameError(err.errorMessage);
+                                setEmailError(err.errorMessage);
+                                setPasswordError(err.errorMessage);
+                            break;
+                        }   
+                    });
+                }
+                return;
+            }
+            
+            console.log("success!!", data.sessionId);
+            localStorage.setItem("loggedIn", "true");
+            navigate("/");
+        }
+        catch (err)
+        {
+            setLoading(false);
+            setUsernameError("Username must be between 2-32 characters in length")
+            setEmailError("Please use a valid email address")
+            setPasswordError("Password does not fit requirements")
+        }
+    }
+
+    const checkUsername = async() =>
+    {
+        if(username === "")
+            return;
+        try
+        {
+            console.log(username);
+            const res = await fetch("http://localhost:5000/auth/checkUsername",
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    },
+                body: JSON.stringify({ username }),
+            });
+            const data = await res.json();
+
+            if(data.available)
+                setUsernameError("");
+            else
+                setUsernameError("Username already taken");
+        }
+        catch (err)
+        {
+            setUsernameError("Error checking username");
+            console.error("Error checking username:", err);
+        }
+    }
 
     return(
         <section className="relative min-h-screen flex items-center justify-center pt-16 sm:pt-20 px-4 sm:px-6 lg:px-8 overflow-hidden"> 
@@ -21,8 +126,16 @@ export default function SignupComponent()
                         type="text"
                         id="username"
                         placeholder="coolguy123"
-                        className="w-full px-4 py-2 border border-gray-300 text-black rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+                        value={username}
+                        onChange={(e) => {setUsername(e.target.value);}}
+                        onBlur={() => checkUsername()}
+                        onFocus={() => setUsernameError("")}
+                        className={`w-full px-4 py-2 border ${usernameError !== ""? ("border-red-500") : ("border-gray-300")} text-black rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400`}
                     />
+                    {usernameError !== "" && <div className="flex flex-row items-center mt-0.5 space-x-0.5">
+                        <CircleAlert color="red" size="12"/>
+                        <p className="text-red-500 text-xs -mt-0.5">{usernameError}</p>    
+                    </div>}
                 </div>
 
                 {/* email */}
@@ -34,8 +147,15 @@ export default function SignupComponent()
                         type="email"
                         id="email"
                         placeholder="you@example.com"
-                        className="w-full px-4 py-2 border border-gray-300 text-black rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        onFocus={() => setEmailError("")}
+                        className={`w-full px-4 py-2 border ${emailError !== ""? ("border-red-500") : ("border-gray-300")} text-black rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400`}
                     />
+                    {emailError !== "" && <div className="flex flex-row items-center mt-0.5 space-x-0.5">
+                        <CircleAlert color="red" size="12"/>
+                        <p className="text-red-500 text-xs -mt-0.5">{emailError}</p>    
+                    </div>}
                 </div>
 
                 {/* password */}
@@ -47,18 +167,32 @@ export default function SignupComponent()
                         type="password"
                         id="password"
                         placeholder="********"
-                        className="w-full px-4 py-2 border border-gray-300 text-black rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        onFocus={() => setPasswordError("")}
+                        className={`w-full px-4 py-2 border ${passwordError !== ""? ("border-red-500") : ("border-gray-300")} text-black rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400`}
                     />
+                    {passwordError !== "" && <div className="flex flex-row items-center mt-0.5 space-x-0.5">
+                        <CircleAlert color="red" size="12"/>
+                        <p className="text-red-500 text-xs -mt-0.5">{passwordError}</p>    
+                    </div>}
                 </div>
 
                 {/* terms notice */}
-                <p className="text-gray-700 text-sm -mt-3">
-                    Forgot password?
+                <p className="text-gray-700 text-xs -mt-3">
+                    By clicking "Sign Up", you agree to our{" "}
+                    <a href="/terms" className="text-blue-500 hover:underline">
+                        Terms of Service
+                    </a>
+                    {" "}and have read the{" "}
+                    <a href="/terms" className="text-blue-500 hover:underline">
+                        Privacy Policy
+                    </a>
                 </p>
 
                 {/* Sign up button */}
-                <button className="bg-blue-900 text-white font-semibold h-12 w-full mt-4 mb-2 rounded-xl">
-                    Sign Up
+                <button className={`text-white font-semibold h-12 w-full mt-4 mb-2 rounded-xl flex items-center justify-center cursor-pointer transition-colors hover:bg-blue-800 ${loading? ("bg-blue-300") : ("bg-blue-700")}`} disabled={loading} onClick={signup}>
+                    {loading ? (<LoaderCircle className="w-9 h-9 animate-spin"/>) : ("Sign up")}
                 </button>
 
                 {/* login instead */}
@@ -67,7 +201,7 @@ export default function SignupComponent()
                         Already have an account? 
                     </span>
 
-                    <button className="text-blue-800 pl-1 text-sm" 
+                    <button className="text-blue-800 pl-1 text-sm cursor-pointer hover:underline" 
                     onClick={() => navigate("/login")}>
                         Log in
                     </button>

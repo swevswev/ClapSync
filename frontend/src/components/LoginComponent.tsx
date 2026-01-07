@@ -1,8 +1,54 @@
-import { useNavigate } from "react-router-dom";
+import { redirect, useNavigate } from "react-router-dom";
+import { useState } from "react";
+import { CircleAlert, LoaderCircle } from "lucide-react";
 
 export default function LoginComponent()
 {
     const navigate = useNavigate(); 
+
+    const [email, setEmail] = useState("");
+    const [password, setPassword] = useState("");
+    const [error, setError] = useState(false);
+    const [loading, setLoading] = useState(false);
+
+    const login = async () =>
+    {
+        if(email === "" && password === "")
+            return;
+        setLoading(true);
+
+        try
+        {
+            const res = await fetch("http://localhost:5000/auth/login",
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                  },
+                credentials: "include",
+                body: JSON.stringify({ email, password }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                setError(data.error || "Login failed");
+                setLoading(false);
+                return;
+            }
+
+            console.log("SUCCESSFULLY LOGGED IN: ", data.sessionId);
+            setLoading(false);
+            localStorage.setItem("loggedIn", "true");
+            navigate("/");
+    
+        }
+        catch (err)
+        {
+            setLoading(false);
+            setError(true);
+        }
+        
+    }
+
 
     return(
         <section className="relative min-h-screen flex items-center justify-center pt-16 sm:pt-20 px-4 sm:px-6 lg:px-8 overflow-hidden"> 
@@ -20,8 +66,15 @@ export default function LoginComponent()
                         type="email"
                         id="email"
                         placeholder="you@example.com"
-                        className="w-full px-4 py-2 border border-gray-300 text-black rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        onFocus={() => setError(false)}
+                        className={`w-full px-4 py-2 border ${error? ("border-red-500") : ("border-gray-300")} text-black rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400`}
                     />
+                    {error && <div className="flex flex-row items-center mt-0.5 space-x-0.5">
+                        <CircleAlert color="red" size="12"/>
+                        <p className="text-red-500 text-xs -mt-0.5"> Login or password is invalid. </p>    
+                    </div>}
                 </div>
 
                 {/* password */}
@@ -33,18 +86,25 @@ export default function LoginComponent()
                         type="password"
                         id="password"
                         placeholder="********"
-                        className="w-full px-4 py-2 border border-gray-300 text-black rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        onFocus={() => setError(false)}
+                        className={`w-full px-4 py-2 border ${error? ("border-red-500") : ("border-gray-300")} text-black rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400`}
                     />
+                    {error && <div className="flex flex-row items-center mt-0.5 space-x-0.5">
+                        <CircleAlert color="red" size="12"/>
+                        <p className="text-red-500 text-xs -mt-0.5"> Login or password is invalid. </p>    
+                    </div>}
                 </div>
 
                 {/* forgot password? */}
-                <button className="text-blue-800 text-sm -mt-3">
+                <button className="text-blue-800 text-sm -mt-3 cursor-pointer hover:underline">
                     Forgot password?
                 </button>
 
                 {/* login button */}
-                <button className="bg-blue-900 text-white font-semibold h-12 w-full mt-4 mb-2 rounded-xl">
-                    Log In
+                <button className={`text-white font-semibold h-12 w-full mt-4 mb-2 rounded-xl flex items-center justify-center cursor-pointer transition-colors hover:bg-blue-800 ${loading? ("bg-blue-300") : ("bg-blue-700")}`} disabled={loading} onClick={login}>
+                    {loading ? (<LoaderCircle className="w-9 h-9 animate-spin"/>) : ("Log in")}
                 </button>
 
                 {/* register instead */}
@@ -53,7 +113,7 @@ export default function LoginComponent()
                         Need an account?
                     </span>
 
-                    <button className="text-blue-800 pl-1 text-sm" 
+                    <button className="text-blue-800 pl-1 text-sm cursor-pointer hover:underline" 
                     onClick={() => navigate("/login?mode=signup")}>
                         Register
                     </button>
