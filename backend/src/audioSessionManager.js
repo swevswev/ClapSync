@@ -30,7 +30,8 @@ const s3 = new S3Client({
 });
 
 const ddb = DynamoDBDocumentClient.from(ddbClient);
-const AUDIO_SESSIONS_TABLE = process.env.AUDIO_SESSION_TABLE_NAME
+const AUDIO_SESSIONS_TABLE = process.env.AUDIO_SESSION_TABLE_NAME;
+const USER_TABLE = process.env.USER_TABLE_NAME;
 /*
 activeSessions = {
   "audio-session-id-123": {
@@ -40,22 +41,20 @@ activeSessions = {
 }
 */
 
-async function createSession(userSessionId)
+async function createSession(userId, userSessionId)
 {
-    //check if userId is a valid account userId function
     const time = new Date().toISOString();
-    
     let audioSessionId = await getSessionIdFromUser(userSessionId);
     
     if (audioSessionId) return null;
 
-    audioSessionId = crypto.randomUUID();
+    audioSessionId = crypto.randomUUID().replace(/-/g, "").slice(0, 10);
 
     const item =
     {
         "audio-session-id": audioSessionId,
         "collaborators": {},
-        "owner": userSessionId,
+        "owner": userId,
         "videoIds": {},
         "creation-time": time,
         "status": "initialized"
@@ -70,7 +69,7 @@ async function createSession(userSessionId)
                     ConditionExpression: "attribute_not_exists(sessionId)",
                 })
             );
-            setAudioSessionId(userSessionId, audioSessionId);
+            setAudioSessionId(userId, audioSessionId);
         }
         catch (err)
         {
@@ -84,29 +83,30 @@ async function createSession(userSessionId)
     return audioSessionId;
 }
 
-async function joinSession(userSessionId, audioSessionId, userName)
+async function joinSession(userId, audioSessionId)
 {
     const session = await getSession(audioSessionId);
     if (!session?.Item) return null;
 
-    const currentUserSession = await getSessionIdFromUser(userSessionId)
-    if (currentUserSession?.Item?.audioSessionId)
-    {
-        console.log("ALREADY IN A SESSION");
+    const currentUserSession = await getSessionIdFromUser(userId);
 
-        //just link them back towards that session
-        return null
-    }
-
+    const owner = isOwner(userId, session);
     //tryna access a finished session to download clips
-    if (session.Item.status == "finished" && isOwner(userSessionId, session))
+    if (session.Item.status == "finished" && owner)
     {
         //allow access
         return null
     }
 
-    if (!userName || !validateUserName(userName))
+    if (session.Item.status == "initialized" && !owner)
+    {
+        //error, not owner of sessios, session is not initialized
+        console.error("Not owner of session, session is not initialized");
         return null;
+    }
+
+    if(owner)
+        return true;
 
     const collaboratorCount = Object.keys(session.collaborators || {}).length;
     const maxUsers = Number(process.env.AUDIO_SESSION_USER_SIZE);
@@ -122,9 +122,9 @@ async function joinSession(userSessionId, audioSessionId, userName)
             new UpdateCommand({
                 TableName: process.env.AUDIO_SESSION_TABLE_NAME,
                 Key: {"audio-session-id": audioSessionId},
-                UpdateExpression: "SET collaborators.#usid = :data",
+                UpdateExpression: "SET collaborators.#uid = :data",
                 ExpressionAttributeNames: {
-                    "#usid": userSessionId, 
+                    "#uid": userId, 
                 },
                 ExpressionAttributeValues: {
                 ":data": { joinedAt: new Date().toISOString() }, // metadata for this user
@@ -133,12 +133,13 @@ async function joinSession(userSessionId, audioSessionId, userName)
         )
 
         setAudioSessionId(userSessionId, audioSessionId);
-        //signal join to the session
+        return true;
     }
     catch (err)
     {
         console.log("Failed to join session:", err);
     }
+    return null;
 
 }
 
@@ -226,16 +227,28 @@ async function getSessionFiles(userSessionId)
 
 
 //Get sessionId if user has one active
-async function getSessionIdFromUser(userSessionId)
+export async function getSessionIdFromUser(userId)
 {
-    if (!userSessionId) return null;
+    if (!userId) return null;
 
-    const userSession = await getUserSession(userSessionId);
-    const audioSessionId = userSession?.Item?.["audioSessionId"];
+    try {
+        const userResult = await ddb.send(
+            new GetCommand({
+                TableName: USER_TABLE,
+                Key: { "user-id": userId }
+            })
+        );
 
-    if (!audioSessionId) return null;
+        if (!userResult.Item || !userResult.Item.audioSessionId) {
+            return null;
+        }
 
-    return audioSessionId;
+        return userResult.Item.audioSessionId;
+    }
+    catch (err) {
+        console.error("Error getting session ID from user:", err);
+        return null;
+    }
 }
 
 async function getSession(sessionId)
@@ -254,29 +267,25 @@ async function getSession(sessionId)
     }
 }
 
-async function isOwner(userSessionId, session)
+async function isOwner(userId, session)
 {
     if (!session?.Item) return false;
-    return session.Item.owner === userSessionId;
+    return session.Item.owner === userId;
 }
 
 
-async function setAudioSessionId(userSessionId, audioSessionId)
+async function setAudioSessionId(userId, audioSessionId)
 {
-    if (!userSessionId || !audioSessionId) return null;
+    if (!userId || !audioSessionId) return null;
     try
     {
         await ddb.send(
             new UpdateCommand({
-                TableName: process.env.USER_SESSION_TABLE_NAME,
-                Key: {"user-session-id": userSessionId},
-                UpdateExpression: "SET #data.#asid = :sid",
-                ExpressionAttributeNames: {
-                    "#data": "data",
-                    "#asid": "audio-session-id",
-                },
+                TableName: USER_TABLE,
+                Key: {"user-id": userId},
+                UpdateExpression: "SET audioSessionId = :sid",
                 ExpressionAttributeValues: {
-                ":sid": audioSessionId,
+                    ":sid": audioSessionId,
                 },
             })
         )
@@ -406,9 +415,9 @@ async function closeSession(audioSessionId)
 
 
 //exported functions
-export function createAudioSession(userSessionId)
+export function createAudioSession(userId, userSessionId)
 {
-    return createSession(userSessionId);
+    return createSession(userId, userSessionId);
 }
 
 export function getAudioSession(sessionId)
@@ -416,9 +425,9 @@ export function getAudioSession(sessionId)
     return getSession(sessionId);
 }
 
-export function joinAudioSession(userSessionId, sessionId)
+export function joinAudioSession(userId, sessionId)
 {
-    return joinSession(userSessionId, "54205874-be5a-4ade-b66e-dc90ee532dcf")
+    return joinSession(userId, sessionId);
 }
 
 export function removeFromAudioSession(sessionId, reason)

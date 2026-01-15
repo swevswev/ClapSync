@@ -1,7 +1,7 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, QueryCommand, PutCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import crypto, { verify } from "crypto";
-import { createUserSession } from "./userSessions.js";
+import { createUserSession, getUserSession } from "./userSessions.js";
 import { deleteSession } from "./userSessions.js";
 import bcrypt from "bcrypt";
 
@@ -40,6 +40,7 @@ export async function findEmail(email){
     }
 }
 
+
 export async function verifyPassword(password){
     const minLength = 8;
     const maxLength = 64;
@@ -63,6 +64,26 @@ export async function verifyUsername(username){
     }
 
     return true;
+}
+
+
+export async function getUser(userSessionId)
+{
+    if (!userSessionId) return null;
+    
+    try 
+    {
+        const session = await getUserSession(userSessionId);
+        if (!session || !session.Item) {
+            return null;
+        }
+        return session.Item.userId;
+    }
+    catch (err) 
+    {
+        console.error("Error getting user from session:", err);
+        return null;
+    }
 }
 
 export async function checkUsername(username)
