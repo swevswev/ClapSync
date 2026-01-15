@@ -7,10 +7,10 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, PutCommand } from "@aws-sdk/lib-dynamodb";
 import crypto from "crypto";
 import { getUserSession, useSession } from "./userSessions.js";
-import { createAudioSession, joinAudioSession } from "./audioSessionManager.js";
+import { createAudioSession, joinAudioSession, getSessionIdFromUser } from "./audioSessionManager.js";
 import { setupWebSocket } from "./websocket.js";
 import http from "http";
-import { checkUsername, login, verifyEmail, verifyUsername, verifyPassword, findEmail, createAccount, logout } from "./accountManager.js";
+import { checkUsername, login, verifyEmail, verifyUsername, verifyPassword, findEmail, createAccount, logout, getUser } from "./accountManager.js";
 import cookieParser from "cookie-parser";
 
 dotenv.config(); // load .env variables
@@ -97,30 +97,81 @@ app.post("/upload", upload.single("file"), async (req, res) => {
   }
 });
 
-app.post("/createSession", async (req, res) => {
+app.post("/create", async (req, res) => {
   const userSessionId = req.cookies["usid"];
 
   if (!userSessionId) {
       return res.status(401).json({ error: "No user session cookie found" });
   }
 
-  const sessionId = createAudioSession(userSessionId);
+  const userId = await getUser(userSessionId);
+  if (!userId) {
+    return res.status(401).json({ error: "User not found" });
+  }
+
+  const sessionId = await createAudioSession(userId, userSessionId);
   if (sessionId)
   {
     res.json({message: "Session created", sessionId});
   }
+  else
+  {
+    res.status(400).json({error: "Failed to create session or user already in a session"});
+  }
 })
 
-app.post("/joinSession", async (req, res) => 
+app.post("/preJoin", async (req, res) => 
 {
   const userSessionId = req.cookies["usid"];
   if (!userSessionId) {
       return res.status(401).json({ error: "No user session cookie found" });
   }
 
-  joinAudioSession(userSessionId);
+  const userId = await getUser(userSessionId);
+  if (!userId) {
+    return res.status(401).json({ error: "User not found" });
+  }
+
+  const audioSessionId = await getSessionIdFromUser(userId); 
+  if (audioSessionId)
+  {
+    return res.status(400).json({ error: "User already in a session", audioSessionId });
+  }
+
+  res.json({ message: "Can join a session" });
 })
 
+
+app.post("/join", async (req, res) => 
+  {
+    console.log("Joining session");
+    const userSessionId = req.cookies["usid"];
+    if (!userSessionId) {
+        return res.status(401).json({ error: "No user session cookie found" });
+    }
+    console.log("userSessionId: ", userSessionId);
+    const userId = await getUser(userSessionId);
+    if (!userId) {
+      return res.status(401).json({ error: "User not found" });
+    }
+    console.log("userId: ", userId);
+    
+    if (!req.body || !req.body.sessionId) {
+      return res.status(400).json({ error: "Missing sessionId in request body" });
+    }
+    
+    const result = await joinAudioSession(userId, req.body.sessionId);
+    if (result) {
+      return res.status(200).json({ message: "Joined session" });
+    } else {
+      return res.status(400).json({ error: "Failed to join session" });
+    }
+  })
+
+app.post("/session/:id", async (req, res) =>
+{
+
+});
 
 app.post("/auth/login", async (req,res) => 
 {
