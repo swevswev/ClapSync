@@ -1,5 +1,5 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, QueryCommand, PutCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, QueryCommand, PutCommand, UpdateCommand, GetCommand } from "@aws-sdk/lib-dynamodb";
 import crypto, { verify } from "crypto";
 import { createUserSession, getUserSession } from "./userSessions.js";
 import { deleteSession } from "./userSessions.js";
@@ -64,6 +64,20 @@ export async function verifyUsername(username){
     }
 
     return true;
+}
+
+export async function getUserName(userId)
+{
+    if (!userId) return null;
+    try
+    {
+        const result = await ddb.send(new GetCommand({TableName: USER_TABLE, Key: {"user-id": userId}}));
+        return result.Item?.username;
+    }
+    catch (err)
+    {
+        console.error("Error getting user name from user id:", err);
+    }
 }
 
 

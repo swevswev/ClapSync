@@ -168,10 +168,6 @@ app.post("/join", async (req, res) =>
     }
   })
 
-app.post("/session/:id", async (req, res) =>
-{
-
-});
 
 app.post("/auth/login", async (req,res) => 
 {
@@ -267,8 +263,20 @@ app.post("/logout", async (req, res) =>
 
 });
 
-app.get("/", (req, res) => {
-  res.send("✅ Session middleware working!");
+app.get("/auth/checkLogin", async (req, res) => {
+  const userSessionId = req.cookies["usid"];
+
+  if (!userSessionId) {
+      return res.status(200).json({ success: false, errorMessage: "No user session cookie found" });
+  }
+
+  const userId = await getUser(userSessionId);
+  if (userId) {
+    return res.status(200).json({success: true, errorMessage: "Logged In"});
+  }
+
+  return res.status(200).json({success: false, errorMessage: "Logged Out"});
+
 });
 
 

@@ -1,11 +1,12 @@
 import { LogOut, Menu, X } from "lucide-react";
 import logo from "../assets/cat.jpg";
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useAuth } from "../contexts/AuthContext";
 
 
 export default function Navbar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [loggedIn, setLoggedIn] = useState(localStorage.getItem("loggedIn") === "true");
+  const { loggedIn, setLoggedIn, checkLoginStatus } = useAuth();
 
   const logout = async() =>
   {
@@ -25,16 +26,10 @@ export default function Navbar() {
 
       localStorage.removeItem("loggedIn");
       setLoggedIn(false);
+      // Re-check login status to ensure state is synced
+      await checkLoginStatus();
       console.log("LOG OUT SUCCESSFUL")
   };
-
-  useEffect(()=>
-  {
-    const value = localStorage.getItem("loggedIn");
-    console.log("loggedIn from localStorage:", value);
-    setLoggedIn(localStorage.getItem("loggedIn") === "true");
-    console.log(loggedIn);
-  },[]);
 
   return (
     <nav className="fixed top-0 w-full z-50 transition-all duration-300 bg-slate-900/20 backdrop-blur-sm">
@@ -119,7 +114,7 @@ export default function Navbar() {
             </a>
 
             <div className="bg-white rounded-md">
-              <a href="/signup" className=" hover:text-white text-sm lg:text-base bg-slate-900 bg-clip-text text-transparent px-1.5 rounded-md">
+              <a href="/login?mode=signup" className=" hover:text-white text-sm lg:text-base bg-slate-900 bg-clip-text text-transparent px-1.5 rounded-md">
                 Sign Up
               </a>
             </div>
