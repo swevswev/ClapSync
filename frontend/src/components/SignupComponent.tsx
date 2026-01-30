@@ -1,6 +1,7 @@
 import { CircleAlert, LoaderCircle } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "../contexts/AuthContext";
 
 export type SignupError = {
     errorType: "username" | "email" | "password";
@@ -10,6 +11,7 @@ export type SignupError = {
 export default function SignupComponent()
 {
     const navigate = useNavigate(); 
+    const { setLoggedIn, checkLoginStatus } = useAuth(); 
 
     const [username, setUsername] = useState("");
     const [email, setEmail] = useState("");
@@ -69,6 +71,9 @@ export default function SignupComponent()
             
             console.log("success!!", data.sessionId);
             localStorage.setItem("loggedIn", "true");
+            setLoggedIn(true);
+            // Re-check to ensure state is synced
+            await checkLoginStatus();
             navigate("/");
         }
         catch (err)
@@ -111,15 +116,15 @@ export default function SignupComponent()
 
     return(
         <section className="relative min-h-screen flex items-center justify-center pt-16 sm:pt-20 px-4 sm:px-6 lg:px-8 overflow-hidden"> 
-            <div className="w-full max-w-md mx-auto flex items-start flex-col bg-white p-8 sm:p-10 rounded-2xl animate-in slide-in-from-bottom duration-1500 shadow-lg">
+            <div className="w-full max-w-md mx-auto flex items-start flex-col bg-gray-800/50 border-1 border-gray-700 p-8 sm:p-10 rounded-2xl animate-in slide-in-from-bottom duration-1500 shadow-lg">
 
-                <h1 className="text-blue-500 font-bold self-center text-2xl">
+                <h1 className="text-blue-100 font-bold self-center text-2xl">
                     Create An Account
                 </h1>
 
                 {/* username */}
                 <div className="w-full mb-4">
-                    <label htmlFor="username" className="block text-gray-700 mb-2 font-medium">
+                    <label htmlFor="username" className="block text-gray-300 mb-2 font-medium">
                         Username
                     </label>
                     <input
@@ -130,7 +135,7 @@ export default function SignupComponent()
                         onChange={(e) => {setUsername(e.target.value);}}
                         onBlur={() => checkUsername()}
                         onFocus={() => setUsernameError("")}
-                        className={`w-full px-4 py-2 border ${usernameError !== ""? ("border-red-500") : ("border-gray-300")} text-black rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400`}
+                        className={`w-full px-4 py-2 border ${usernameError !== ""? ("border-red-500") : ("border-gray-300")} text-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400`}
                     />
                     {usernameError !== "" && <div className="flex flex-row items-center mt-0.5 space-x-0.5">
                         <CircleAlert color="red" size="12"/>
@@ -140,7 +145,7 @@ export default function SignupComponent()
 
                 {/* email */}
                 <div className="w-full mb-4">
-                    <label htmlFor="email" className="block text-gray-700 mb-2 font-medium">
+                    <label htmlFor="email" className="block text-gray-300 mb-2 font-medium">
                         Email
                     </label>
                     <input
@@ -150,7 +155,7 @@ export default function SignupComponent()
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
                         onFocus={() => setEmailError("")}
-                        className={`w-full px-4 py-2 border ${emailError !== ""? ("border-red-500") : ("border-gray-300")} text-black rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400`}
+                        className={`w-full px-4 py-2 border ${emailError !== ""? ("border-red-500") : ("border-gray-300")} text-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400`}
                     />
                     {emailError !== "" && <div className="flex flex-row items-center mt-0.5 space-x-0.5">
                         <CircleAlert color="red" size="12"/>
@@ -160,7 +165,7 @@ export default function SignupComponent()
 
                 {/* password */}
                 <div className="w-full mb-4">
-                    <label htmlFor="password" className="block text-gray-700 mb-2 font-medium">
+                    <label htmlFor="password" className="block text-gray-300 mb-2 font-medium">
                         Password
                     </label>
                     <input
@@ -170,7 +175,7 @@ export default function SignupComponent()
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
                         onFocus={() => setPasswordError("")}
-                        className={`w-full px-4 py-2 border ${passwordError !== ""? ("border-red-500") : ("border-gray-300")} text-black rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400`}
+                        className={`w-full px-4 py-2 border ${passwordError !== ""? ("border-red-500") : ("border-gray-300")} text-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400`}
                     />
                     {passwordError !== "" && <div className="flex flex-row items-center mt-0.5 space-x-0.5">
                         <CircleAlert color="red" size="12"/>
@@ -179,29 +184,29 @@ export default function SignupComponent()
                 </div>
 
                 {/* terms notice */}
-                <p className="text-gray-700 text-xs -mt-3">
+                <p className="text-gray-300/50 text-xs -mt-3">
                     By clicking "Sign Up", you agree to our{" "}
-                    <a href="/terms" className="text-blue-500 hover:underline">
+                    <a href="/terms" className="text-blue-400/90 hover:underline">
                         Terms of Service
                     </a>
                     {" "}and have read the{" "}
-                    <a href="/terms" className="text-blue-500 hover:underline">
+                    <a href="/terms" className="text-blue-400/90 hover:underline">
                         Privacy Policy
                     </a>
                 </p>
 
                 {/* Sign up button */}
-                <button className={`text-white font-semibold h-12 w-full mt-4 mb-2 rounded-xl flex items-center justify-center cursor-pointer transition-colors hover:bg-blue-800 ${loading? ("bg-blue-300") : ("bg-blue-700")}`} disabled={loading} onClick={signup}>
+                <button className={`text-gray-100 font-semibold h-12 w-full mt-4 mb-2 rounded-xl flex items-center justify-center cursor-pointer transition-colors hover:bg-blue-800 ${loading? ("bg-blue-300") : ("bg-blue-600")}`} disabled={loading} onClick={signup}>
                     {loading ? (<LoaderCircle className="w-9 h-9 animate-spin"/>) : ("Sign up")}
                 </button>
 
                 {/* login instead */}
                 <div>
-                    <span className="text-gray-600 text-sm">
+                    <span className="text-gray-300/50 text-sm">
                         Already have an account? 
                     </span>
 
-                    <button className="text-blue-800 pl-1 text-sm cursor-pointer hover:underline" 
+                    <button className="text-blue-400/90 pl-1 text-sm cursor-pointer hover:underline" 
                     onClick={() => navigate("/login")}>
                         Log in
                     </button>

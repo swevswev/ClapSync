@@ -72,7 +72,6 @@ export default function Precheck({ onAverageChange, audioSessionId, mode }: Prec
             dataArrayRef.current = new Uint8Array(new ArrayBuffer(bufferLengthRef.current));
 
             setMicrophoneAccess(true);
-
             updateVisualizer();
             return true;
         } 
@@ -263,20 +262,6 @@ export default function Precheck({ onAverageChange, audioSessionId, mode }: Prec
         
         if (mode === "join") {
             sessionId = link;
-
-            const res = await fetch("http://localhost:5000/join", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                credentials: "include",
-                body: JSON.stringify({ sessionId: link }),
-            });
-            
-            if (!res.ok) {
-                console.error("Failed to join session");
-                return;
-            }
         } else {
             sessionId = audioSessionId || link;
         }
@@ -334,26 +319,26 @@ export default function Precheck({ onAverageChange, audioSessionId, mode }: Prec
                     <div className="w-full h-6 rounded-lg flex flex-row items-center justify-start space-x-3">
                         {/* input device selector */}
                         <div className="w-1/3 h-full border-gray-100/50 border-2 rounded-lg">
-                            <select onChange={(e) => setInputDevice(e.target.value)} className="w-full h-full bg-gray-800 text-gray-200 text-start text-xs md:text-sm">
+                            <select onChange={(e) => setInputDevice(e.target.value)} className="w-full h-full bg-gray-800 text-gray-200 text-start text-xs md:text-sm rounded-lg appearance-auto cursor-pointer pl-1 flex items-center">
                                 {inputDevices.map((device) => (
-                                    <option className="bg-gray-800" key={device.deviceId} value={device.deviceId}>{device.label || "Unknown Device"}</option>
+                                    <option className="bg-gray-800 text-gray-200" key={device.deviceId} value={device.deviceId}>{device.label || "Unknown Device"}</option>
                                 ))}
                             </select>
                         </div>
 
                         {/* output device selector */}
                         <div className="w-1/3 h-full border-gray-100/50 border-2 rounded-lg">
-                            <select onChange={(e) => setOutputDevice(e.target.value)} className="w-full h-full bg-gray-800 text-gray-200 text-start text-xs md:text-sm">
+                            <select onChange={(e) => setOutputDevice(e.target.value)} className="w-full h-full bg-gray-800 text-gray-200 text-start text-xs md:text-sm rounded-lg appearance-auto cursor-pointer pl-1 flex items-center"> t
                                 {outputDevices.map((device) => (
-                                    <option className="bg-gray-800" key={device.deviceId} value={device.deviceId}>{device.label || "Unknown Device"}</option>
+                                    <option className="bg-gray-800 text-gray-200" key={device.deviceId} value={device.deviceId}>{device.label || "Unknown Device"}</option>
                                 ))}
                             </select>
                         </div>
 
                         {/* echo microphone toggle */}
                         <div className="w-auto h-full flex flex-row items-start justify-start space-x-2">
-                            <button onClick={toggleEcho} className="w-6 h-6 border-gray-100/50 border-2 rounded-lg cursor-pointer"> 
-                                {echo ? <div className="w-full h-full p-2 rounded-md bg-gray-200" /> : <div className="w-full h-full p-2 rounded-md" />}
+                            <button onClick={toggleEcho} className="w-6 h-6 border-gray-200/50 bg-gray-800 border-2 rounded-lg items-center flex justify-center cursor-pointer"> 
+                                {echo ? <div className="w-4.5 h-4.5 rounded-full bg-gray-300" /> : <div className="w-full h-full p-2 rounded-md" />}
                             </button>
                             <span className="text-gray-200 text-center text-xs md:text-sm"> Echo </span>
                         </div>

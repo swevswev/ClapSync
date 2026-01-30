@@ -16,6 +16,11 @@
         animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1); 
     }
 
+    .animate-dot-pulse {
+        animation-name: dotPulse;
+        animation-timing-function: ease-in-out;
+    }
+
     .duration-300 {
         animation-duration: 300ms;
     }
@@ -49,6 +54,10 @@
     {
         animation-delay: 600ms;
     }
+
+    .animate-infinite {
+        animation-iteration-count: infinite;
+    }
 }
 
 @keyframes slideInFromBottom
@@ -74,5 +83,17 @@
     to {
         opacity: 1;
         transform: translateY(0);
+    }
+}
+
+@keyframes dotPulse
+{
+    0%, 100% {
+        opacity: 0.4;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 1;
+        transform: scale(1.5);
     }
 }
