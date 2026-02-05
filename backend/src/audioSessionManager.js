@@ -508,6 +508,27 @@ async function closeSession(audioSessionId)
 }
 
 
+
+// Check if user has already uploaded
+export async function hasUserUploaded(sessionId, userId) {
+    if (!sessionId || !userId) return false;
+    
+    // Quick check in-memory first (fast)
+    const sessionData = activeSessions.get(sessionId);
+    if (sessionData && sessionData.uploadedRecordings && sessionData.uploadedRecordings.has(userId)) {
+        return true;
+    }
+}
+
+export async function markUserUploaded(sessionId, userId)
+{
+    if (!sessionId || !userId) return null;
+    const sessionData = activeSessions.get(sessionId);
+    if (sessionData && sessionData.uploadedRecordings)
+        sessionData.uploadedRecordings.add(userId);
+    return true;
+}
+
 //exported functions
 export function createAudioSession(userId, userSessionId)
 {

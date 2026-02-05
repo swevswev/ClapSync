@@ -8,13 +8,26 @@ import {v4 as uuidv4} from "uuid";
 
 export const activeSessions = new Map();
 
-const recordingBuffer = 10000 //10 secs
-const MIC_LEVEL_BROADCAST_INTERVAL = 100; // 100ms = 10 updates per second
+const recordingBuffer = 5000 //5 secs
+const MIC_LEVEL_BROADCAST_INTERVAL = 200; 
 
 export function setupWebSocket(server) 
 {
   const wss = new WebSocketServer({ noServer: true });
 
+  function getUserIdFromSocket(sessionData, ws) {
+    for (const [uid, socket] of sessionData.sockets.entries()) {
+      if (socket === ws) return uid;
+    }
+    return null;
+  }
+
+  function serverNowMs()
+  {
+    // Use Date.now() directly for consistency with client-side time
+    // High-resolution time can drift, so we use standard Date.now() for sync
+    return Date.now();
+  }
   /**
    * When user joins or creates session, allows websocket connection if they are a verified user to the session's websocket
    */
@@ -95,51 +108,70 @@ export function setupWebSocket(server)
    */
   const handleMessage = 
   {
-    startRecording: (data, ws, sessionData, userSessionId) =>
+    startRecording: (data, ws, sessionData) =>
     {
-      if (userSessionId != sessionData.owner)
-        return;
 
+      const userId = getUserIdFromSocket(sessionData, ws);
+      
+      if (!userId || userId !== sessionData.owner) return;
+
+      sessionData.uploadedRecordings.clear();
       const time = Date.now() + recordingBuffer;
 
-      for (const [usid, socket] of sessionData.sockets.entries())
+      for (const [uid, socket] of sessionData.sockets.entries())
       {
-        if (socket.readyState === ws.OPEN)
+        if (socket.readyState === 1)
         {
-          socket.send(JSON.stringify({type: "startRecording", time: Date.now()}));
+          socket.send(JSON.stringify({type: "startRecording", time:time}));
         }
       }
     },
 
-    pauseRecording: (data, ws, sessionData, userSessionId) =>
+    pauseRecording: (data, ws, sessionData) =>
     {
-      if (userSessionId != sessionData.owner)
-        return;
+      const userId = getUserIdFromSocket(sessionData, ws);
+      if (!userId || userId !== sessionData.owner) return;
 
       for (const [usid, socket] of sessionData.sockets.entries())
       {
-        if (socket.readyState === ws.OPEN)
+        if (socket.readyState === 1)
         {
           socket.send(JSON.stringify({type: "pauseRecording", time: Date.now()}));
         }
       }
     },
 
-    stopRecording: (data, ws, sessionData, userSessionId) =>
+    resumeRecording: (data, ws, sessionData) =>
     {
-      if (userSessionId != sessionData.owner)
-        return;
+      const userId = getUserIdFromSocket(sessionData, ws);
+      if (!userId || userId !== sessionData.owner) return;
 
       for (const [usid, socket] of sessionData.sockets.entries())
       {
-        if (socket.readyState === ws.OPEN)
+        if (socket.readyState === 1)
         {
-          socket.send(JSON.stringify({type: "stopRecording", time}));
+          socket.send(JSON.stringify({type: "resumeRecording", time: Date.now()}));
         }
       }
     },
 
-    kickUser: (data, ws, sessionData, userSessionId) =>
+    stopRecording: (data, ws, sessionData, userSessionId) =>
+    {
+      const userId = getUserIdFromSocket(sessionData, ws);
+      if (!userId || userId !== sessionData.owner) return;
+
+      const time = Date.now() + recordingBuffer;
+
+      for (const [usid, socket] of sessionData.sockets.entries())
+      {
+        if (socket.readyState === 1)
+        {
+          socket.send(JSON.stringify({type: "stopRecording", time: time}));
+        }
+      }
+    },
+
+    kickUser: (data, ws, sessionData) =>
     {
       // Find the userId from the socket to verify ownership
       let userId = null;
@@ -173,7 +205,7 @@ export function setupWebSocket(server)
 
     ping: (data, ws) =>
     {
-      ws.send(JSON.stringify({type: "pong", time: Date.now(), clientTime: data.clientTime}));
+      ws.send(JSON.stringify({type: "pong", time: serverNowMs(), clientTime: data.clientTime}));
     },
 
     micLevel: (data, ws, sessionData) =>
@@ -319,6 +351,7 @@ export function setupWebSocket(server)
             micLevels: new Map(), // Store mic levels by localId
             pingDelays: new Map(), // Store ping delays by localId
             mutedUsers: new Map(),
+            uploadedRecordings: new Set(), // Track userIds who have uploaded (fast in-memory check)
             broadcastInterval: null // Interval timer for broadcasting mic levels
         }
         activeSessions.set(audioSessionId, sessionData);
@@ -415,9 +448,9 @@ export function setupWebSocket(server)
         pingDelays: pingDelaysMap
     }));
 
-    for (const [usid, socket] of sessionData.sockets.entries())
+    for (const [uid, socket] of sessionData.sockets.entries())
       {
-        if (socket !== ws && socket.readyState === ws.OPEN) {
+        if (socket !== ws && socket.readyState === 1) {
           socket.send(JSON.stringify({ type: "join", userName: userName, localId: localId}));
         }
       }

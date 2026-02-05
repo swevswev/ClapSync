@@ -24,11 +24,21 @@ export default function SessionPage()
     const [muted, setMuted] = useState(false);
     const mutedRef = useRef(false);
     const [mutedUsers, setMutedUsers] = useState<Record<string, boolean>>({});
+    type RecordingState = "idle" | "countdown" | "recording" | "stopping" | "paused";
+    const [recordingState, setRecordingState] = useState<RecordingState>("idle");
+    const [countdownTime, setCountdownTime] = useState(0);
+
 
     const navigate = useNavigate();
 
     //Time syncing:
     const lastPingTimeRef = useRef(0);
+    const serverTimeOffsetRef = useRef(0);
+    const serverTimeOffsetList = useRef<Array<{delay: number, offset: number}>>([]);
+    const countdownStartTimeRef = useRef(0);
+    const recordingStartTimeRef = useRef(0);
+    const recordingStartTimestampRef = useRef<number | null>(null);
+    const MAX_OFFSET_SAMPLES = 10;
 
     // Audio analysis refs
     const contextRef = useRef<AudioContext | null>(null);
@@ -38,6 +48,12 @@ export default function SessionPage()
     const dataArrayRef = useRef<Uint8Array | null>(null);
     const bufferLengthRef = useRef<number | null>(null);
     const animationFrameRef = useRef<number | null>(null);
+
+    //Recording refs
+    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+    const chunksRef = useRef<Blob[]>([]);
+    const startRecordingTimeoutRef = useRef<number | null>(null);
+    const stopRecordingTimeoutRef = useRef<number | null>(null);
 
     const loadSessionData = (data: {users: Record<string, string>, self: string, owner: string, mutedUsers?: Record<string, boolean>, pingDelays?: Record<string, number>}) => {
         console.log("Session data received:", data);
@@ -52,11 +68,54 @@ export default function SessionPage()
         }
     };
 
+
+    function clientNowMs()
+    {
+        // Ensure both values are numbers (timeOrigin can be BigInt in some environments)
+        const timeOrigin = Number(performance.timeOrigin);
+        const now = performance.now();
+        return timeOrigin + now;
+    }
+
     function kickUser(localId: string)
     {
         console.log("Kicking user:", localId);
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && sessionData?.self === sessionData?.owner) {
             wsRef.current.send(JSON.stringify({type: "kickUser", localId: localId}));
+        }
+    }
+
+    function startRecording()
+    {
+        if (recordingState === "idle")
+        {
+            if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && sessionData?.self === sessionData?.owner)
+                {
+                    wsRef.current.send(JSON.stringify({type: "startRecording"}));
+                }
+        }
+        else if (recordingState === "paused")
+        {
+            if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && sessionData?.self === sessionData?.owner)
+            {
+                wsRef.current.send(JSON.stringify({type: "resumeRecording"}));
+            }
+        }
+    }
+
+    function stopRecording()
+    {
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && sessionData?.self === sessionData?.owner)
+        {
+            wsRef.current.send(JSON.stringify({type: "stopRecording"}));
+        }
+    }
+
+    function pauseRecording()
+    {
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && sessionData?.self === sessionData?.owner)
+        {
+            wsRef.current.send(JSON.stringify({type: "pauseRecording"}));
         }
     }
 
@@ -88,6 +147,20 @@ export default function SessionPage()
                 sourceRef.current.disconnect();
             }
             sourceRef.current = context.createMediaStreamSource(streamRef.current);
+
+
+            if (!mediaRecorderRef.current) {
+                mediaRecorderRef.current = new MediaRecorder(streamRef.current);
+                chunksRef.current = [];
+                mediaRecorderRef.current.ondataavailable = (event: BlobEvent) => {
+                    if (event.data.size > 0) chunksRef.current.push(event.data);
+                  };
+            
+                mediaRecorderRef.current.onstop = async () => {
+                    const audioBlob = new Blob(chunksRef.current, { type: "audio/webm" });
+                    await requestUploadFile(audioBlob);
+                };
+            }
 
             if (!analyserRef.current) {
                 analyserRef.current = context.createAnalyser();
@@ -144,6 +217,42 @@ export default function SessionPage()
             const currentTime = performance.now();
             wsRef.current.send(JSON.stringify({type: "ping", clientTime: currentTime.toString()}));
             lastPingTimeRef.current = currentTime;
+        }
+    }
+
+    function updateServerTimeOffset(serverTime: number, delay: number)
+    {
+        const now = clientNowMs();
+        const estimatedServerTime = serverTime + delay;
+        const estimatedOffset = estimatedServerTime - now;
+
+        // Add new sample to the list
+        serverTimeOffsetList.current.push({ delay, offset: estimatedOffset });
+
+        // Keep only MAX_OFFSET_SAMPLES samples by removing the one with largest delay
+        if (serverTimeOffsetList.current.length > MAX_OFFSET_SAMPLES) {
+            // Find the index of the sample with the largest delay
+            let maxDelayIndex = 0;
+            let maxDelay = serverTimeOffsetList.current[0].delay;
+            for (let i = 1; i < serverTimeOffsetList.current.length; i++) {
+                if (serverTimeOffsetList.current[i].delay > maxDelay) {
+                    maxDelay = serverTimeOffsetList.current[i].delay;
+                    maxDelayIndex = i;
+                }
+            }
+            // Remove the sample with the largest delay
+            serverTimeOffsetList.current.splice(maxDelayIndex, 1);
+        }
+
+        // Find the sample with the lowest delay
+        if (serverTimeOffsetList.current.length > 0) {
+            const lowestDelaySample = serverTimeOffsetList.current.reduce((min, sample) => 
+                sample.delay < min.delay ? sample : min
+            );
+            
+            // Set the offset ref to the offset of the lowest delay sample
+            serverTimeOffsetRef.current = lowestDelaySample.offset;
+            console.log("Server time offset:", serverTimeOffsetRef.current);
         }
     }
 
@@ -225,6 +334,94 @@ export default function SessionPage()
         setPingDelays(data.delays);
     }
 
+    function requestStartRecording()
+    {
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && sessionData?.self === sessionData?.owner)
+        {
+            wsRef.current.send(JSON.stringify({type: "startRecording"}));
+        }
+    }
+
+    // Get audio duration from blob
+    async function getAudioDuration(blob: Blob): Promise<number> {
+        return new Promise((resolve, reject) => {
+            const audio = new Audio();
+            const url = URL.createObjectURL(blob);
+            
+            audio.addEventListener('loadedmetadata', () => {
+                const duration = audio.duration; // Duration in seconds
+                URL.revokeObjectURL(url);
+                resolve(duration);
+            });
+            
+            audio.addEventListener('error', (e) => {
+                URL.revokeObjectURL(url);
+                console.error("Error loading audio metadata:", e);
+                // Fallback: calculate from recording timestamps if available
+                if (recordingStartTimestampRef.current) {
+                    const duration = (Date.now() - recordingStartTimestampRef.current) / 1000;
+                    resolve(duration);
+                } else {
+                    reject(new Error("Could not determine audio duration"));
+                }
+            });
+            
+            audio.src = url;
+        });
+    }
+
+    async function requestUploadFile(blob: Blob)
+    {
+        if (!blob || recordingState === "recording") return;
+        try
+        {
+            // Check file size on client side (in bytes)
+            const fileSizeBytes = blob.size;
+            const fileSizeMB = (fileSizeBytes / (1024 * 1024)).toFixed(2);
+            console.log(`File size: ${fileSizeBytes} bytes (${fileSizeMB} MB)`);
+            
+            // Optional: Check if file is too large before uploading
+            const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
+            if (fileSizeBytes > MAX_FILE_SIZE) {
+                console.error("File too large!");
+                alert(`File is too large (${fileSizeMB} MB). Maximum size is 100MB.`);
+                return;
+            }
+            
+            // Get audio duration
+            let duration = 0;
+            try {
+                duration = await getAudioDuration(blob);
+                console.log(`Audio duration: ${duration.toFixed(2)} seconds`);
+            } catch (err) {
+                console.warn("Could not get audio duration, using 0:", err);
+            }
+            
+            const formData = new FormData();
+            formData.append("file", blob, "recording.webm");
+            formData.append("duration", duration.toString()); // Send duration as string
+            
+            const uploadResponse = await fetch("http://localhost:5000/upload", 
+            {
+            method: "POST",
+            body: formData,
+            credentials: "include",
+            });
+            
+            if (!uploadResponse.ok) {
+                throw new Error("Upload failed: " + uploadResponse.statusText);
+            }
+            const data = await uploadResponse.json();
+            console.log("Upload successful:", data);
+        }
+        catch(err)
+        {
+            console.error("Error uploading file:", err);
+            const errorMessage = err instanceof Error ? err.message : "Unknown error occurred";
+            alert(`Error uploading file: ${errorMessage}`);
+        }
+    }
+
 
     useEffect(() => {
         // Store reference to old socket before creating new one
@@ -265,13 +462,76 @@ export default function SessionPage()
                         const currentTime = performance.now();
                         const clientTime = parseFloat(data.clientTime);
                         const roundTripTime = currentTime - clientTime;
-                        const delay = roundTripTime / 2 + 100; // One-way delay
+                        const delay = roundTripTime / 2; // One-way delay
+                        // Ensure serverTime is a number
+                        const serverTime = Number(data.time);
+                        updateServerTimeOffset(serverTime, delay);
                         updatePingToServer(delay);
                         break;
                     case "micLevels":
                         updateMicLevels(data);
                         break;
                     case "startRecording":
+                        const targetServerTime = Number(data.time);
+                        recordingStartTimeRef.current = targetServerTime;
+                        const currentClientTime = clientNowMs();
+                        const currentServerTime = currentClientTime + serverTimeOffsetRef.current;
+                        const timeUntilStart = Math.max(0, targetServerTime - currentServerTime);
+                        setCountdownTime(timeUntilStart);
+                        console.log("Start recording - Target server time:", targetServerTime, "Current server time:", currentServerTime, "Time until start:", timeUntilStart);
+                        
+                        setRecordingState("countdown");
+                        countdownStartTimeRef.current = targetServerTime;
+                        
+                        if (startRecordingTimeoutRef.current) {
+                            clearTimeout(startRecordingTimeoutRef.current);
+                            startRecordingTimeoutRef.current = null;
+                        }
+
+                        startRecordingTimeoutRef.current = window.setTimeout(async () => {
+                            // Ensure we have mic access and a recorder
+                            if (!mediaRecorderRef.current) {
+                                await getMicrophoneAccess();
+                            }
+                            const mr = mediaRecorderRef.current;
+                            if (!mr || mr.state === "recording") return;
+
+                            // Reset chunks right before we start
+                            chunksRef.current = [];
+                            mr.start();
+                            recordingStartTimestampRef.current = Date.now(); // Track when recording actually starts
+                            setRecordingState("recording");
+                            startRecordingTimeoutRef.current = null;
+                        }, timeUntilStart);
+                        break;
+                    case "cutRecording":
+                        recordingStartTimeRef.current = Number(data.time);
+                        break;
+                    case "stopRecording":
+                        {
+                            console.log("Stop recording - Target server time:", data.time);
+                            const targetStopServerTime = Number(data.time);
+                            const clientTime = clientNowMs();
+                            const serverTime = clientTime + serverTimeOffsetRef.current;
+                            const timeUntilStop = Math.max(0, targetStopServerTime - serverTime);
+
+                            if (stopRecordingTimeoutRef.current) {
+                                clearTimeout(stopRecordingTimeoutRef.current);
+                                stopRecordingTimeoutRef.current = null;
+                            }
+
+                            // Set stopping state immediately
+                            setRecordingState("stopping");
+                            
+                            stopRecordingTimeoutRef.current = window.setTimeout(() => {
+                                const mr = mediaRecorderRef.current;
+                                if (mr && mr.state === "recording") {
+                                    mr.stop();
+                                }
+                                setRecordingState("idle");
+                                stopRecordingTimeoutRef.current = null;
+                            }, timeUntilStop);
+                        }
                         break;
                     case "removed":
                         console.log("User removed:", data.reason, data.localId);
@@ -307,6 +567,14 @@ export default function SessionPage()
                 console.log("Closing WebSocket connection");
                 wsRef.current.close();
                 wsRef.current = null;
+            }
+            if (startRecordingTimeoutRef.current) {
+                clearTimeout(startRecordingTimeoutRef.current);
+                startRecordingTimeoutRef.current = null;
+            }
+            if (stopRecordingTimeoutRef.current) {
+                clearTimeout(stopRecordingTimeoutRef.current);
+                stopRecordingTimeoutRef.current = null;
             }
             // Clean up mic level sending interval
             if (sendMicLevelIntervalRef.current) {
@@ -349,6 +617,28 @@ export default function SessionPage()
         }
     }, [connected]);
 
+    useEffect(() => {
+        if (recordingState !== "countdown") {
+            setCountdownTime(0);
+            return;
+        }
+
+        const updateCountdown = () => {
+            const currentClientTime = clientNowMs();
+            const currentServerTime = currentClientTime + serverTimeOffsetRef.current;
+            const timeUntilStart = countdownStartTimeRef.current - currentServerTime;
+            setCountdownTime(Math.max(0, timeUntilStart));
+        };
+
+        // Update immediately
+        updateCountdown();
+
+        // Update every 100ms for smooth countdown
+        const interval = setInterval(updateCountdown, 100);
+
+        return () => clearInterval(interval);
+    }, [recordingState]);
+
 
     useEffect(() => {
         // Update the ref whenever muted state changes
@@ -377,7 +667,7 @@ export default function SessionPage()
 
     return (
         <div className="min-h-screen bg-slate-900 text-white overflow-hidden">
-            {isLoaded && sessionData ? <SessionComponent sessionData={sessionData} audioSessionId={id || ""} micLevels={micLevels} muted={muted} setMuted={setMuted} kickUser={kickUser} mutedUsers={mutedUsers} pingDelays={pingDelays} /> : <div className="flex flex-col items-center justify-center h-screen space-y-4">
+            {isLoaded && sessionData ? <SessionComponent sessionData={sessionData} audioSessionId={id || ""} micLevels={micLevels} muted={muted} recordingState={recordingState} countdownTime={countdownTime} setMuted={setMuted} kickUser={kickUser} pauseRecording={pauseRecording} mutedUsers={mutedUsers} pingDelays={pingDelays} startRecording={startRecording} stopRecording={stopRecording} /> : <div className="flex flex-col items-center justify-center h-screen space-y-4">
                 <img src={loading} alt="Loading" className="w-40 h-40 animate-in slide-in-from-bottom duration-2000 delay-500" />
                 <div className="flex flex-row items-center space-x-8">
                     <div className="w-5 h-5 bg-white rounded-full animate-dot-pulse duration-1500 animate-infinite"></div>
