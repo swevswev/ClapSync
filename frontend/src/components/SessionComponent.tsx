@@ -1,5 +1,5 @@
 import { Copy, Crown, LogOut, Play, Users, Pause, Square, Download, SignalHigh, SignalMedium, SignalLow, SignalZero, Mic, ArrowDownToLine, MicOff, Scissors, UserX } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import waiting from "../assets/waiting.png";
 
@@ -8,6 +8,8 @@ interface SessionData {
     self: string;
     owner: string;
 }
+
+type RecordingState = "idle" | "countdown" | "recording" | "stopping" | "paused";
 
 interface SessionComponentProps {
     sessionData: SessionData;
@@ -18,16 +20,31 @@ interface SessionComponentProps {
     mutedUsers: Record<string, boolean>;
     pingDelays: Record<string, number>; 
     kickUser: (localId: string) => void;
+    startRecording: () => void;
+    stopRecording: () => void;
+    pauseRecording: () => void;
+    recordingState: RecordingState;
+    countdownTime: number;
 }
 
-export default function SessionComponent({ sessionData, audioSessionId, micLevels, muted, setMuted, kickUser, mutedUsers, pingDelays}: SessionComponentProps)
+export default function SessionComponent({ sessionData, audioSessionId, micLevels, muted, setMuted, kickUser, pauseRecording, startRecording, stopRecording, mutedUsers, recordingState, countdownTime, pingDelays}: SessionComponentProps)
 {
     const navigate = useNavigate();
     const [isOwner, setIsOwner] = useState(true);
-    const [isRecording, setIsRecording] = useState(false);
 
     const [copied, setCopied] = useState(false);
     const [downloadsPanelOpen, setDownloadsPanelOpen] = useState(false);
+    const [displayCountdown, setDisplayCountdown] = useState(0);
+    const [displayRecordingTime, setDisplayRecordingTime] = useState("00:00:00");
+
+    let startTimeRef = useRef(0);
+    
+    const formatTime = (seconds: number): string => {
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    };
     
     const copySessionId = async () => 
     {
@@ -39,8 +56,53 @@ export default function SessionComponent({ sessionData, audioSessionId, micLevel
     }
 
     useEffect(() => {
-        console.log("pingDelays", pingDelays);
+       
     }, [pingDelays]);
+
+    useEffect(() => {
+        if (recordingState !== "countdown") {
+            setDisplayCountdown(0);
+            return;
+        }
+
+        const updateCountdown = () => {
+            // countdownTime is in milliseconds, convert to seconds
+            const secondsRemaining = Math.max(0, Math.ceil(countdownTime / 1000));
+            setDisplayCountdown(secondsRemaining);
+        };
+
+        updateCountdown();
+
+        const interval = setInterval(updateCountdown, 100);
+
+        return () => clearInterval(interval);
+    }, [recordingState, countdownTime]);
+
+    // Update recording time when recording
+    useEffect(() => {
+        if (recordingState !== "recording") {
+            setDisplayRecordingTime("00:00:00");
+            startTimeRef.current = 0;
+            return;
+        }
+
+        // Set start time when recording begins
+        if (startTimeRef.current === 0) {
+            startTimeRef.current = Date.now();
+        }
+
+        const updateRecordingTime = () => {
+            const elapsed = (Date.now() - startTimeRef.current) / 1000;
+            setDisplayRecordingTime(formatTime(elapsed));
+        };
+
+        updateRecordingTime();
+
+        // Update every second
+        const interval = setInterval(updateRecordingTime, 1000);
+
+        return () => clearInterval(interval);
+    }, [recordingState]);
 
     const getSignalIcon = (pingMs: number | undefined) => {
         const safePing = Number.isFinite(pingMs) ? (pingMs as number) : Number.POSITIVE_INFINITY;
@@ -129,9 +191,22 @@ export default function SessionComponent({ sessionData, audioSessionId, micLevel
 
                     {/* Session Display */}
                     <div className="w-full h-108 bg-gray-800/50 border-1 border-gray-700  rounded-lg flex justify-center items-center">
-                        {isRecording ? (
+                        {recordingState === "countdown" ? (
                             <div className="flex flex-row justify-center items-center space-x-2">
-                                <span className="text-gray-200 text-4xl font-semibold">Recording: 00:00</span>
+                                <span className="text-gray-200 text-4xl font-semibold">Starting in: {displayCountdown}s</span>
+                            </div>
+                        ) : recordingState === "recording" ? (
+                            <div className="flex flex-row justify-center items-center space-x-2">
+                                <span className="text-gray-200 text-4xl font-semibold">Recording: {displayRecordingTime}</span>
+                            </div>
+                        ) : recordingState === "stopping" ? (
+                            <div className="flex flex-row justify-center items-center space-x-2">
+                                <span className="text-gray-200 text-4xl font-semibold">Stopping...</span>
+                            </div>
+
+                        ) : recordingState === "paused" ? (
+                            <div className="flex flex-row justify-center items-center space-x-2">
+                                <span className="text-gray-200 text-4xl font-semibold">Paused</span>
                             </div>
                         ) : (
                             <div className="flex flex-row justify-center items-center space-x-4">
@@ -148,20 +223,17 @@ export default function SessionComponent({ sessionData, audioSessionId, micLevel
                     <div className="w-full h-16 rounded-lg flex flex-row justify-between items-center">
                         {isOwner ? (
                             <div className="flex flex-row justify-center items-center space-x-2 border-1 border-gray-700 bg-gray-800/50 rounded-lg">
-                                { isRecording ? (
+                                { recordingState === "recording" || recordingState === "stopping" ? (
                                     <div className="flex flex-row justify-center items-center space-x-2">
-                                        <button className="w-12 h-12 rounded-lg justify-center items-center cursor-pointer">
+                                        <button onClick={() => stopRecording()}className="w-12 h-12 rounded-lg justify-center items-center cursor-pointer">
                                             <Square className="w-10 h-10 text-gray-200" />
                                         </button>
-                                        <button className="w-12 h-12 rounded-lg justify-center items-center cursor-pointer">
+                                        <button onClick={() => pauseRecording()} className="w-12 h-12 rounded-lg justify-center items-center cursor-pointer">
                                             <Pause className="w-10 h-10 text-gray-200" />
-                                        </button>
-                                        <button className="w-12 h-12 rounded-lg justify-center items-center cursor-pointer">
-                                            <Scissors className="w-10 h-10 text-gray-200" />
                                         </button>
                                     </div>
                                 ) : (
-                                    <button className="w-12 h-12 rounded-lg flex flex-row justify-center items-center cursor-pointer">
+                                    <button onClick={() => startRecording() } className="w-12 h-12 rounded-lg flex flex-row justify-center items-center cursor-pointer">
                                         <Play className="w-10 h-10 text-gray-200" />
                                     </button>
                                 )}
