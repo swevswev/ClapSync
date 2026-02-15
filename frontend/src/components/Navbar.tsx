@@ -58,12 +58,12 @@ export default function Navbar() {
         <div className="hidden md:flex items-center space-x-6 lg:space-x-8">
 
           {/*About Us*/}
-          <a href="/about" className="text-gray-300 hover:text-white text-sm lg:text-base"
+          <a href="/about" className="text-gray-300 hover:text-white font-semibold text-sm lg:text-base"
               >About Us
           </a>
           
           {/*FEATURES*/}
-          <a href="/#features" className="text-gray-300 hover:text-white text-sm lg:text-base"
+          <a href="/#features" className="text-gray-300 hover:text-white font-semibold text-sm lg:text-base"
           onClick={(e) => 
             {
               if (window.location.pathname === "/") 
@@ -81,7 +81,7 @@ export default function Navbar() {
           </a>
 
           {/* PRICING */}
-          <a href="/#pricing" className="text-gray-300 hover:text-white text-sm lg:text-base"
+          <a href="/#pricing" className="text-gray-300 hover:text-white font-semibold text-sm lg:text-base"
           onClick={(e) => 
             {
               if (window.location.pathname === "/") 
@@ -102,24 +102,48 @@ export default function Navbar() {
           {loggedIn ?
           (
             <button className="flex flex-row items-center space-x-1.5 group text-gray-300">
-              <span className="group-hover:text-white text-sm lg:text-base"
+              <span className="group-hover:text-white font-semibold text-sm lg:text-base"
               onClick={logout}> Logout </span>
               <LogOut className="w-4 h-4 mt-1 group-hover:text-white"/>
             </button>
           )
           :
           (<div className="flex space-x-2 items-center">
-            <a href="/login" className="text-gray-300 hover:text-white text-sm lg:text-base bg-white/20 px-1.5 rounded-md">
+            <a href="/login" className="text-gray-300 hover:text-white hover:bg-blue-800/20 font-semibold text-sm lg:text-base px-1.5 rounded-md">
               Login
             </a>
 
-            <div className="bg-white rounded-md">
-              <a href="/login?mode=signup" className=" hover:text-white text-sm lg:text-base bg-slate-900 bg-clip-text text-transparent px-1.5 rounded-md">
+            <div className="bg-gray-200 hover:bg-white rounded-md">
+              <a href="/login?mode=signup" className=" hover:text-black font-semibold text-sm lg:text-base bg-slate-900 bg-clip-text text-transparent px-1.5 rounded-md">
                 Sign Up
               </a>
             </div>
           </div>)}
 
+        </div>
+
+        {/* Mobile Login/Signup/Logout - shown to left of hamburger */}
+        <div className="md:hidden flex items-center space-x-2 ml-auto mr-2">
+          {loggedIn ? (
+            <button 
+              onClick={logout}
+              className="flex flex-row items-center space-x-1 text-gray-300 hover:text-white"
+            >
+              <span className="font-semibold text-sm">Logout</span>
+              <LogOut className="w-4 h-4"/>
+            </button>
+          ) : (
+            <div className="flex space-x-2 items-center">
+              <a href="/login" className="text-gray-300 hover:text-white hover:bg-blue-800/20 font-semibold text-sm px-1.5 py-1 rounded-md">
+                Login
+              </a>
+              <div className="bg-gray-200 hover:bg-white rounded-md">
+                <a href="/login?mode=signup" className="hover:text-black font-semibold text-sm bg-slate-900 bg-clip-text text-transparent px-1.5 py-1 rounded-md">
+                  Sign Up
+                </a>
+              </div>
+            </div>
+          )}
         </div>
 
         <button className="md:hidden p-2 text-gray-300 hover:text-white"

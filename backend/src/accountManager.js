@@ -102,7 +102,6 @@ export async function getUser(userSessionId)
 
 export async function checkUsername(username)
 {
-    console.log(username);
     const params = {
         TableName: process.env.USER_TABLE_NAME,
         IndexName: "username-index", // your GSI name
@@ -146,7 +145,8 @@ export async function createAccount(username, email, password){
         username: username,
         lowercaseUsername: username.toLowerCase(),
         password: hashPassword,
-        sessionId: sessionId
+        sessionId: sessionId,
+        previousSessions: [],
     }
 
     try{

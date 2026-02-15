@@ -10,7 +10,7 @@ export default function Login() {
     const mode = searchParams.get("mode"); // "signup" or null
   
     return (
-      <div className="min-h-screen bg-slate-900 text-white overflow-hidden">
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 text-white overflow-hidden">
         <Navbar />
         {mode === "signup" ? <SignupComponent /> : <LoginComponent />}
       </div>

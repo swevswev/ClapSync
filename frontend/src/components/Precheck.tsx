@@ -271,7 +271,7 @@ export default function Precheck({ onAverageChange, audioSessionId, mode }: Prec
             return;
         }
         const isOwner = mode === "create";
-        navigate(`/session/${sessionId}`, { state: { isOwner } });
+        navigate(`/session/${sessionId}`, { state: { isOwner, inputDevice } });
     }
 
     useEffect(() => {
@@ -369,7 +369,7 @@ export default function Precheck({ onAverageChange, audioSessionId, mode }: Prec
 
                     {/* ready button / go back button*/}
                     <div className="flex flex-row items-center justify-center space-x-3">
-                        <button onClick={ready} className="group sm:flex-1 px-12 sm:px-8 py-2 text-white bg-gradient-to-b from-blue-700 to-blue-500 rounded-full font-semibold text-xs sm:text-base transition-all duration-600 hover:scale-102 items-center justify-center">   
+                        <button onClick={ready} className="group sm:flex-1 px-12 sm:px-8 py-2 text-white bg-gradient-to-b from-blue-900 to-indigo-800 rounded-full font-semibold text-xs sm:text-base transition-all duration-600 hover:scale-102 items-center justify-center">   
                             <span> Ready </span>
                         </button>
 

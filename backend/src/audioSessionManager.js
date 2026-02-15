@@ -1,14 +1,10 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand, DeleteCommand } from "@aws-sdk/lib-dynamodb";
-import { getUserSession } from "./userSessions.js";
 import crypto from "crypto";
 import dotenv from "dotenv";
-import { WebSocketServer } from "ws";
-import app from "./app.js";
 import { activeSessions } from "./websocket.js";
-import { ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { ListObjectsV2Command, HeadObjectCommand, GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { validateUserName } from "./accountManager.js";
 
 dotenv.config();
 
@@ -89,12 +85,8 @@ async function createSession(userId, userSessionId)
 
 async function joinSession(userId, audioSessionId)
 {
-    console.log("Joining session");
     const session = await getSession(audioSessionId);
     if (!session?.Item) return null;
-
-
-    console.log("Got session");
     //make sure user can join session
     //const currentUserSession = await getSessionIdFromUser(userId);
 
@@ -102,8 +94,7 @@ async function joinSession(userId, audioSessionId)
     //tryna access a finished session to download clips
     if (session.Item.status == "finished" && isOwner)
     {
-        //allow access
-        return null
+        return session.Item.status;
     }
 
     if (session.Item.status == "initialized" && !isOwner)
@@ -129,21 +120,17 @@ async function joinSession(userId, audioSessionId)
         }
         catch (err)
         {
-            console.log("Failed to update session status:", err);
+            // Failed to update session status
         }
         
         await setAudioSessionId(userId, audioSessionId);
         return true;
     }
 
-    console.log("collaborators: ", session.Item.collaborators);
-
     //make sure session is not closed
 
     const collaboratorCount = Object.keys(session.Item.collaborators || {}).length;
     const maxUsers = Number(process.env.AUDIO_SESSION_USER_SIZE);
-
-    console.log(collaboratorCount, maxUsers);
 
     if (collaboratorCount >= (maxUsers - 1)) return null;
     if (session.Item.collaborators?.[userId]) return null;
@@ -169,48 +156,19 @@ async function joinSession(userId, audioSessionId)
     }
     catch (err)
     {
-        console.log("Failed to join session:", err);
+        // Failed to join session
     }
     return null;
 
 }
 
-async function uploadFileToSession(name, sessionId,  duration)
-{
-    if (!name || !sessionId)
-        return null;
-
-    //get username and replace file userid with username
-    const fileKey = `recordings/${sessionId}/${name}-${Date.now()}.webm`;
-    try
-    {
-        const command = new PutObjectCommand({
-            Bucket: process.env.S3_BUCKET_NAME,
-            Key: fileKey,
-            ContentType: "video/webm",
-            Metadata:
-            {
-                uploaderName: name,
-                duration: duration || "unkown"
-            }
-        });
-
-        const url = await getSignedUrl(s3, command, { expiresIn: 60 }); // 60 seconds
-        return url;
-    }
-    catch(err)
-    {
-        console.error("Failed to upload file  to session", err)
-        return null;
-    }
-}
-
-
 async function listObjectsFromS3(sessionId)
 {
+    const prefix = `recordings/${sessionId}/`;
+    
     const command = new ListObjectsV2Command({
         Bucket: process.env.S3_BUCKET_NAME,
-        Prefix: "recordings/${sessionId}/"
+        Prefix: prefix
     })
 
     try
@@ -227,32 +185,37 @@ async function listObjectsFromS3(sessionId)
                 Key: obj.Key
             }));
 
-            result.push
-            ({
+            const fileInfo = {
                 filename: obj.Key,
                 uploader: head.Metadata?.uploaderName,
                 duration: head.Metadata?.duration,
                 size: obj.Size
-            })
+            };
+            result.push(fileInfo);
         }
 
         return result;
     }
     catch (err)
     {
-        console.error("Failed to retrieve from s3", err);
+        console.error("[listObjectsFromS3] Failed to retrieve from s3:", err);
+        console.error("[listObjectsFromS3] Error details:", err.message, err.stack);
         return [];
     }
 }
 
-async function getSessionFiles(userSessionId)
+export async function getSessionFiles(audioSessionId)
 {
-    const audioSessionId = getSessionIdFromUser(userSessionId);
-    const session = getSession(audioSessionId);
-    if(!session || !session.Item) return null;
-    if(session.Item.owner != userSessionId) return null;
+    const session = await getSession(audioSessionId);
+    if(!session || !session.Item) {
+        return null;
+    }
 
-    const s3Objects = await listObjectsFromS3(sessionId);
+    const s3Objects = await listObjectsFromS3(audioSessionId);
+
+    if(s3Objects.length == 0) {
+        return null;
+    }
 
     return s3Objects;
 }
@@ -331,7 +294,7 @@ async function setAudioSessionId(userId, audioSessionId)
     }
     catch(err)
     {
-        console.log("failed to set audio session id", err);
+        // Failed to set audio session id
     }
 }
 
@@ -350,7 +313,7 @@ async function clearAudioSessionId(userId)
     }
     catch(err)
     {
-        console.log("failed to clear audio session id", err);
+        // Failed to clear audio session id
     }
 }
 
@@ -360,27 +323,20 @@ async function clearAudioSessionId(userId)
 */
 async function leaveAudioSession(userId, reason)
 {
-    console.log("Leaving session for user: ", userId, "reason: ", reason);
-
     if (!userId) return null;
     
     let sessionId;
     let session;
 
-    console.log("User valid: ", userId);
     try {
         sessionId = await getSessionIdFromUser(userId);
         if(!sessionId) return null;
-        console.log("Session ID valid: ", sessionId);
         session = await getSession(sessionId);
         if(!session || !session.Item) return null;
-        console.log("Session valid: ", session.Item);
     } catch (err) {
         console.error("Error in leaveAudioSession:", err);
         return null;
     }
-
-    console.log("Session: ", session?.Item);
 
     //If owner then close the session and disconnect all collaborators
     if(session?.Item?.owner == userId)
@@ -394,16 +350,10 @@ async function leaveAudioSession(userId, reason)
     {
         const sessionData = activeSessions.get(sessionId);
         if (!sessionData) return null;
-
-        console.log("Session data: ", sessionData);
         
         const userData = sessionData.users.get(userId);
         const localId = userData?.localId;
         const ws = sessionData.sockets.get(userId);
-
-        console.log("User data: ", userData);
-        console.log("Local ID: ", localId);
-        console.log("WebSocket: ", ws);
 
         if (ws)
         {
@@ -431,18 +381,13 @@ async function leaveAudioSession(userId, reason)
             })
         )
 
-        console.log("Sending removed message to all other clients");
-
         for (const [uid, socket] of sessionData.sockets.entries())
         {
             if (socket !== ws && socket.readyState === 1) // 1 = WebSocket.OPEN
             {
                 socket.send(JSON.stringify({type: "removed", reason: reason, localId: localId}));
-                console.log("Sent removed message to client: ", uid);
             }
         }
-
-        console.log("User removed for reason: ", reason);
         
         // Clear the user's audioSessionId from their user record
         await clearAudioSessionId(userId);
@@ -479,32 +424,56 @@ async function closeSession(audioSessionId)
     
     activeSessions.delete(audioSessionId);
 
-
-    //Delete session since no recordings saved
-    if (audioSession.Item.videoIds.length == 0)
-    {
-        await ddb.send(new DeleteCommand({
-            TableName: process.env.AUDIO_SESSION_TABLE_NAME,
-            Key: { "audio-session-id": audioSessionId },
-        }));
+    // Check S3 for recordings instead of videoIds (which is never updated)
+    let hasRecordings = false;
+    try {
+        const prefix = `recordings/${audioSessionId}/`;
+        const command = new ListObjectsV2Command({
+            Bucket: process.env.S3_BUCKET_NAME,
+            Prefix: prefix,
+            MaxKeys: 1 // We only need to know if at least one file exists
+        });
+        const response = await s3.send(command);
+        hasRecordings = (response.Contents && response.Contents.length > 0);
+    } catch (err) {
+        console.error("Failed to check S3 for recordings:", err);
+        // If we can't check S3, assume no recordings to be safe
+        hasRecordings = false;
     }
-    else
+
+    if (hasRecordings)
     {
-        await ddb.send(
-            new UpdateCommand({
-                TableName: process.env.AUDIO_SESSION_TABLE_NAME,
-                Key: {"audio-session-id": audioSessionId},
-                UpdateExpression: "SET #status = :newStatus",
-                ExpressionAttributeNames: {
-                    "#status": "status", 
-                },
+        //set id in owner's user entry
+        try {
+            // Get the user record to check if previousSessions exists
+            const userResult = await ddb.send(
+                new GetCommand({
+                    TableName: process.env.USER_TABLE_NAME,
+                    Key: { "user-id": audioSession.Item.owner }
+                })
+            );
+            
+            const existingSessions = userResult.Item?.previousSessions || [];
+            const updatedSessions = [...existingSessions, audioSessionId];
+            
+            await ddb.send(new UpdateCommand({
+                TableName: process.env.USER_TABLE_NAME,
+                Key: {"user-id": audioSession.Item.owner},
+                UpdateExpression: "SET previousSessions = :previousSessions",
                 ExpressionAttributeValues: {
-                ":newStatus": "finished",
+                    ":previousSessions": updatedSessions,
                 },
-            })
-        );
+            }));
+        }
+        catch (err)
+        {
+            console.error("Failed to update previousSessions:", err);
+        }
     }
-
+    await ddb.send(new DeleteCommand({
+        TableName: process.env.AUDIO_SESSION_TABLE_NAME,
+        Key: { "audio-session-id": audioSessionId },
+    }));
 }
 
 
@@ -527,6 +496,101 @@ export async function markUserUploaded(sessionId, userId)
     if (sessionData && sessionData.uploadedRecordings)
         sessionData.uploadedRecordings.add(userId);
     return true;
+}
+
+export async function getPreviousSessionsFiles(userId)
+{
+    const user = await ddb.send(new GetCommand({TableName: USER_TABLE, Key: {"user-id": userId}}));
+    if (!user.Item || !user.Item.previousSessions) return null;
+
+    const result = {};
+    const sessionsToKeep = [];
+    
+    for (const audioSessionId of user.Item.previousSessions)
+    {
+        const prefix = `recordings/${audioSessionId}/`;
+        try {
+            // Check if folder exists and get files with their creation times
+            const command = new ListObjectsV2Command({
+                Bucket: process.env.S3_BUCKET_NAME,
+                Prefix: prefix
+            });
+            const response = await s3.send(command);
+            const objects = response.Contents || [];
+            
+            if (objects.length > 0) {
+                // Get file details with metadata and generate download URLs
+                const filesWithTime = [];
+                for (const obj of objects) {
+                    try {
+                        const head = await s3.send(new HeadObjectCommand({
+                            Bucket: process.env.S3_BUCKET_NAME,
+                            Key: obj.Key
+                        }));
+                        
+                        // Generate signed download URL (valid for 1 hour)
+                        const getObjectCommand = new GetObjectCommand({
+                            Bucket: process.env.S3_BUCKET_NAME,
+                            Key: obj.Key,
+                        });
+                        const downloadUrl = await getSignedUrl(s3, getObjectCommand, { expiresIn: 2 * 60 * 60 });
+                        
+                        // Extract just the filename from the key
+                        const filename = obj.Key.split('/').pop() || obj.Key;
+                        
+                        filesWithTime.push({
+                            filename: filename,
+                            fileKey: obj.Key,
+                            downloadUrl: downloadUrl,
+                            uploader: head.Metadata?.uploaderName || "Unknown",
+                            duration: head.Metadata?.duration || "0",
+                            size: obj.Size,
+                            sizeMB: (obj.Size / (1024 * 1024)).toFixed(2),
+                            createdTime: obj.LastModified ? new Date(obj.LastModified).toISOString() : new Date(0).toISOString(),
+                            audioSessionId: audioSessionId,
+                        });
+                    } catch (err) {
+                        // Skip this file if we can't get metadata or generate URL
+                        continue;
+                    }
+                }
+                
+                // Sort files by creation time (oldest first)
+                filesWithTime.sort((a, b) => new Date(a.createdTime) - new Date(b.createdTime));
+                
+                if (filesWithTime.length > 0) {
+                    result[audioSessionId] = filesWithTime;
+                    sessionsToKeep.push(audioSessionId);
+                }
+            }
+            // If no files, don't add to result or sessionsToKeep (will be removed from previousSessions)
+        } catch (err) {
+            // If S3 check fails, skip this session
+            continue;
+        }
+    }
+    
+    // Update previousSessions in DynamoDB to remove sessions without files
+    if (sessionsToKeep.length !== user.Item.previousSessions.length) {
+        try {
+            await ddb.send(new UpdateCommand({
+                TableName: USER_TABLE,
+                Key: {"user-id": userId},
+                UpdateExpression: "SET previousSessions = :previousSessions",
+                ExpressionAttributeValues: {
+                    ":previousSessions": sessionsToKeep,
+                },
+            }));
+        } catch (err) {
+            console.error("Failed to update previousSessions:", err);
+        }
+    }
+    
+    if (Object.keys(result).length === 0) {
+        return null;
+    }
+    
+    return result;
 }
 
 //exported functions

@@ -74,7 +74,7 @@ async function getSession(sessionId)
     }
     catch (err)
     {
-        console.log("Couldn't Get Session", err)
+        // Failed to get session
     }
 }
 
@@ -90,13 +90,12 @@ async function getUserName(sessionId)
     }
     catch (err)
     {
-        console.log("Couldn't Get Name", err)
+        // Failed to get name
     }
 }
 
 async function updateSession(sessionId)
 {
-    console.log("UPDATING");
     if (!sessionId) return null;
     try
     {
@@ -109,11 +108,10 @@ async function updateSession(sessionId)
                 ExpressionAttributeValues: {":time": time},
             })
         )
-        console.log("UPDATE SUCESXS!");
     }
     catch(err)
     {
-        console.log("Error updating session", err)
+        // Error updating session
     }
 }
 
