@@ -34,9 +34,6 @@ export function setupWebSocket(server)
   server.on("upgrade", async (req, socket, head) => {
     try 
     {
-      console.log("UPGRADE");
-      console.log(req.url);
-
       const { pathname } = parse(req.url, true);
       //Verify proper url layout ./session/(sid)/ws
       const match = pathname.match(/^\/session\/([^/]+)\/ws$/);
@@ -50,8 +47,6 @@ export function setupWebSocket(server)
       const audioSessionId = match[1];
       const cookies = cookie.parse(req.headers.cookie || "");
       const userSessionId = cookies["usid"];
-      
-      console.log(`WebSocket upgrade attempt: audioSessionId=${audioSessionId}, userSessionId=${userSessionId}`);
       
       if (!userSessionId || !audioSessionId)
       {
@@ -69,7 +64,6 @@ export function setupWebSocket(server)
       }
 
       const userId = await(getUser(userSessionId));
-      console.log(`getUser result for ${userSessionId}:`, userId);
       if (!userId)
       {
         console.warn("Error getting user from session - user may not be logged in", { 
@@ -87,8 +81,6 @@ export function setupWebSocket(server)
         socket.destroy();
         return;
       }
-      
-      console.log(`✅ WebSocket upgrade approved: userId=${userId}, audioSessionId=${audioSessionId}`);
 
       //Allow connection to websocket
       wss.handleUpgrade(req, socket, head, (ws) => {
@@ -338,7 +330,6 @@ export function setupWebSocket(server)
    * Each session's socket logic
    */
   wss.on("connection", async (ws, req, audioSessionId, userId, userSessionId) => {
-    console.log(`✅ WebSocket connected: user ${userId} joined session ${audioSessionId}`);
     if (!activeSessions.has(audioSessionId))
     {
         const sessionData =
@@ -364,24 +355,30 @@ export function setupWebSocket(server)
 
     
     const sessionData = activeSessions.get(audioSessionId);
+    let joined = false;
 
+    
     try {
-        await joinAudioSession(userId, audioSessionId);
+        joined = await joinAudioSession(userId, audioSessionId);
     } catch (err) {
         console.error("Failed to join session during WebSocket connection:", err);
         ws.close(1008, "Failed to join session");
         return;
     }
+
+    if(!joined)
+    {
+      ws.close(1008, "Failed to join session");
+      console.error("Failed to join session during WebSocket connection:", err);
+      return;
+    }
     
-    console.log(sessionData.owner);
-    console.log(userId, sessionData.users.has(userId));
     let localId;
     let userName;
     
     // Check if user already has an active connection
     const existingSocket = sessionData.sockets.get(userId);
     if (existingSocket && existingSocket !== ws) {
-      console.log(`⚠️ User ${userId} already has an active connection. Closing old socket.`);
       // Remove event listeners from old socket to prevent disconnect handler from firing
       existingSocket.removeAllListeners();
       // Close the old socket (0 = CONNECTING, 1 = OPEN)
@@ -466,14 +463,10 @@ export function setupWebSocket(server)
     });
 
     ws.on("close", async () => {
-      console.log(`WebSocket closed for user ${userId}`);
       // Only remove user if this socket is still the active one
       const currentSocket = sessionData.sockets.get(userId);
       if (currentSocket === ws) {
-        console.log(`Removing user ${userId} from session (socket was active)`);
         await removeFromAudioSession(userId, "disconnected");
-      } else {
-        console.log(`Ignoring close event for user ${userId} (socket was replaced)`);
       }
     })
   });
