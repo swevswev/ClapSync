@@ -1,18 +1,20 @@
 
-import { Link } from "react-router-dom";
+import { useRef } from "react";
 import Navbar from "../components/Navbar"
 import Hero from "../components/Hero"
-import Pricing from "../components/Pricing"
 import Features from "../components/Features"
 import Footer from "../components/Footer";
 
 export default function Home() {
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   return (
-      <div className="min-h-screen bg-slate-900 text-white overflow-hidden">
+      <div
+          ref={scrollContainerRef}
+          className="h-screen overflow-y-auto overflow-x-hidden scrollbar-hide bg-gradient-to-br from-slate-900 to-slate-800 text-white"
+      >
           <Navbar />
-          <Hero />
+          <Hero scrollContainerRef={scrollContainerRef} />
           <Features />
-          <Pricing />
           <Footer />
       </div>
   );

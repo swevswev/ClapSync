@@ -24,6 +24,13 @@ const COOKIE_OPTIONS = {
 
 const COOKIE_LIFESPAN = 30;
 
+/**
+ * Create a session record in DynamoDB.
+ * @param {string} [sessionId]
+ * @param {string|null} userId
+ * @param {string|null} userName
+ * @returns {Promise<string>}
+ */
 async function createSession(sessionId = crypto.randomUUID(), userId, userName)
 {
     const time = new Date().toISOString();
@@ -62,6 +69,11 @@ async function createSession(sessionId = crypto.randomUUID(), userId, userName)
     return sessionId;
 }
 
+/**
+ * Get a session record by id.
+ * @param {string} sessionId
+ * @returns {Promise<object|null>}
+ */
 async function getSession(sessionId)
 {
     if (!sessionId) return null;
@@ -78,6 +90,11 @@ async function getSession(sessionId)
     }
 }
 
+/**
+ * Get the stored username for a session.
+ * @param {string} sessionId
+ * @returns {Promise<string|null>}
+ */
 async function getUserName(sessionId)
 {
         if (!sessionId) return null;
@@ -94,6 +111,11 @@ async function getUserName(sessionId)
     }
 }
 
+/**
+ * Update a session's lastSeen timestamp.
+ * @param {string} sessionId
+ * @returns {Promise<void|null>}
+ */
 async function updateSession(sessionId)
 {
     if (!sessionId) return null;
@@ -115,6 +137,11 @@ async function updateSession(sessionId)
     }
 }
 
+/**
+ * Delete a session record.
+ * @param {string} sessionId
+ * @returns {Promise<boolean>}
+ */
 export async function deleteSession(sessionId){
     await ddb.send(
         new DeleteCommand({
@@ -125,6 +152,13 @@ export async function deleteSession(sessionId){
     return true;
 }
 
+/**
+ * Ensure requests have a session cookie and backing DynamoDB record.
+ * @param {import("express").Request} req
+ * @param {import("express").Response} res
+ * @param {import("express").NextFunction} next
+ * @returns {Promise<void>}
+ */
 async function sessionHandler(req, res, next)
 {
     let sessionId = req.cookies[COOKIE_NAME]
@@ -149,27 +183,52 @@ async function sessionHandler(req, res, next)
     next();
 }
 
+/**
+ * Wrap an async middleware/handler and forward errors to Express.
+ * @param {(req: any, res: any, next: any) => Promise<any>} fn
+ * @returns {(req: any, res: any, next: any) => void}
+ */
 function asyncHandler(fn) {
   return (req, res, next) => {
     Promise.resolve(fn(req, res, next)).catch(next);
   };
 }
 
+/**
+ * Get a user session record.
+ * @param {string} userSessionId
+ * @returns {Promise<object|null>}
+ */
 export function getUserSession(userSessionId)
 {
     return getSession(userSessionId);
 }
 
-export function createUserSession(undefined, userId, userName)
-{
-    return createSession(undefined, userId, userName)
+/**
+ * Create a new user session for a user.
+ * @param {string|undefined} sessionId
+ * @param {string|null} userId
+ * @param {string|null} userName
+ * @returns {Promise<string>}
+ */
+export function createUserSession(sessionId, userId, userName) {
+  return createSession(sessionId, userId, userName);
 }
 
+/**
+ * Get the user's name from a session record.
+ * @param {string} userSessionId
+ * @returns {Promise<string|null>}
+ */
 export function getUserNameFromSession(userSessionId)
 {
     return getUserName(userSessionId)
 }
 
+/**
+ * Install the session middleware on an Express app instance.
+ * @param {import("express").Express} app
+ */
 export function useSession(app) {
   app.use(cookieParser());
   app.use(asyncHandler(sessionHandler));

@@ -2,6 +2,7 @@ import { CircleAlert, LoaderCircle } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
+import { API_URL } from "../utils/api";
 
 export type SignupError = {
     errorType: "username" | "email" | "password";
@@ -30,7 +31,7 @@ export default function SignupComponent()
         setLoading(true);
         try
         {
-            const res = await fetch("http://localhost:5000/auth/signup",
+            const res = await fetch(`${API_URL}/auth/signup`,
             {
                 method: "POST",
                 headers: {
@@ -92,7 +93,7 @@ export default function SignupComponent()
         try
         {
             console.log(username);
-            const res = await fetch("http://localhost:5000/auth/checkUsername",
+            const res = await fetch(`${API_URL}/auth/checkUsername`,
             {
                 method: "POST",
                 headers: {

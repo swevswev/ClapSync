@@ -1,9 +1,5 @@
+import { Link } from "react-router-dom";
 import logo from "../assets/cat.jpg";
-
-const footerLinks = 
-{
-
-}
 
 export default function Footer()
 {
@@ -24,24 +20,24 @@ export default function Footer()
                             <p className="text-gray-400 text-xs sm:text-sm"> © 2025 ClapSync. All rights reserved. </p>
                         </div>
                         <div className="flex items-center space-x-4 sm:space-x-6 text-xs sm:text-sm leading-none">
-                        <a
-                            href="#"
+                        <Link
+                            to="/privacy"
                             className="text-gray-400 hover:text-white transition-colors duration-200"
                         >
                             Privacy Policy
-                        </a>
-                        <a
-                            href="#"
+                        </Link>
+                        <Link
+                            to="/terms"
                             className="text-gray-400 hover:text-white transition-colors duration-200"
                         >
                             Terms of Service
-                        </a>
-                        <a
-                            href="#"
+                        </Link>
+                        <Link
+                            to="/cookie-settings"
                             className="text-gray-400 hover:text-white transition-colors duration-200"
                         >
                             Cookie Settings
-                        </a>
+                        </Link>
                         </div>
                     </div>
                 </div>

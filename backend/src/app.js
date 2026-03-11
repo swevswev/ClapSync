@@ -6,23 +6,43 @@ import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, PutCommand } from "@aws-sdk/lib-dynamodb";
-import crypto from "crypto";    
 import { getUserSession } from "./userSessions.js";
 import { createAudioSession, joinAudioSession, getSessionIdFromUser, hasUserUploaded, markUserUploaded, getSessionFiles, getOwner, getPreviousSessionsFiles } from "./audioSessionManager.js";
 import { setupWebSocket } from "./websocket.js";
 import { getUserName } from "./accountManager.js";
 import http from "http";
-import { checkUsername, login, verifyEmail, verifyUsername, verifyPassword, findEmail, createAccount, logout, getUser } from "./accountManager.js";
+import { checkUsername, login, verifyEmail, verifyUsername, verifyPassword, findEmail, createAccount, logout, getUser, forgotPassword, checkResetToken, resetPassword } from "./accountManager.js";
 import cookieParser from "cookie-parser";
 
 dotenv.config(); // load .env variables
 
 const app = express();
+
+// Trust proxy is required when behind an ALB/load balancer so req.secure reflects X-Forwarded-Proto.
+app.set('trust proxy', true);
+
 app.use(express.json());
+
+// CORS configuration - use environment variable for production
+// In dev mode, allow all origins. In production, use FRONTEND_URL
+const isProduction = process.env.NODE_ENV === 'production';
+
+let allowedOrigins;
+if (isProduction) {
+  // In production, use FRONTEND_URL if set, otherwise restrict to empty array
+  const frontendUrl = process.env.FRONTEND_URL 
+    ? process.env.FRONTEND_URL.replace(/\/$/, '') // Remove trailing slash
+    : null;
+  allowedOrigins = frontendUrl ? [frontendUrl] : [];
+} else {
+  // In dev mode, always allow all origins
+  allowedOrigins = true;
+}
+
 app.use(cors({
-  origin: true,
+  origin: allowedOrigins,
   credentials: true,
-})); // CHANGE ORIGIN WHEN PRODUCTION FOR SECURITY
+}));
 app.use(cookieParser());
 
 export default app;
@@ -53,18 +73,28 @@ const ddbClient = new DynamoDBClient({
 const ddb = DynamoDBDocumentClient.from(ddbClient);
 
 const COOKIE_NAME = "usid";
-const COOKIE_OPTIONS = {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === "production",
-  sameSite: "lax",
-  maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
-  path: "/",
+
+/**
+ * Cookie options for the user session id.
+ * Uses secure+sameSite=none when served over HTTPS (including behind a proxy/ALB).
+ * @param {import("express").Request} req
+ */
+const getCookieOptions = (req) => {
+  const isSecure = req.secure || process.env.NODE_ENV === "production";
+  return {
+    httpOnly: true,
+    secure: isSecure, // Must be true for sameSite: "none"
+    sameSite: isSecure ? "none" : "lax", // "none" for cross-site, "lax" for same-site
+    partitioned: isSecure, // Required by Chrome for cross-site cookies
+    maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
+    path: "/",
+  };
 };
 
 const COOKIE_LIFESPAN = 30;
 
 
-// Upload endpoint
+// Upload an audio recording to S3 for the user's active session.
 app.post("/upload", upload.single("file"), async (req, res) => {
   try {
     const file = req.file;
@@ -102,12 +132,12 @@ app.post("/upload", upload.single("file"), async (req, res) => {
     // Accept any audio type (audio/webm, audio/ogg, audio/mp4, etc.)
     // Also accept application/octet-stream if filename suggests it's an audio file
     const isAudioType = file.mimetype && file.mimetype.startsWith("audio/");
-    const hasAudioExtension = file.originalname && /\.(webm|ogg|mp3|wav|m4a|aac|flac|opus)$/i.test(file.originalname);
-    const isValidMimeType = isAudioType || 
+    const hasAudioExtension = file.originalname && /\.(webm|ogg|mp3|wav|m4a|aac|flac|opus|weba|mka)$/i.test(file.originalname);
+    const isValidMimeType = isAudioType ||
                             (file.mimetype === "application/octet-stream" && hasAudioExtension);
-    
+
     if (!isValidMimeType) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         message: `File must be an audio file. Received: ${file.mimetype || "unknown"}` 
       });
     }
@@ -126,16 +156,21 @@ app.post("/upload", upload.single("file"), async (req, res) => {
 
     const duration = parseFloat(req.body.duration) || 0;
     const now = new Date();
+    // Use original file extension, or fallback to .webm for backwards compatibility
+    const extMatch = file.originalname && file.originalname.match(/\.([a-z0-9]+)$/i);
+    const fileExt = (extMatch && extMatch[1]) ? extMatch[1].toLowerCase() : "webm";
     const timestamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
-    const fileKey = `recordings/${sessionId}/${username}-${timestamp}.webm`;
-    // Extract just the filename for download (without the path)
-    const downloadFilename = `${username}-${timestamp}.webm`;
-    
+    const fileKey = `recordings/${sessionId}/${username}-${timestamp}.${fileExt}`;
+    const downloadFilename = `${username}-${timestamp}.${fileExt}`;
+    const contentType = file.mimetype && file.mimetype !== "application/octet-stream"
+      ? file.mimetype
+      : (fileExt === "webm" ? "audio/webm" : `audio/${fileExt}`);
+
     const command = new PutObjectCommand({
       Bucket: process.env.S3_BUCKET_NAME,
       Key: fileKey,
       Body: file.buffer,
-      ContentType: "video/webm",
+      ContentType: contentType,
       ContentDisposition: `attachment; filename="${downloadFilename}"`,
       Metadata:
       {
@@ -167,7 +202,7 @@ app.post("/upload", upload.single("file"), async (req, res) => {
   }
 });
 
-//acquire the epstein files for a session
+// Get all uploaded files for a session (owner-only).
 app.post("/getFiles", async (req, res) => {
   const userSessionId = req.cookies["usid"];
   if (!userSessionId) {
@@ -195,6 +230,7 @@ app.post("/getFiles", async (req, res) => {
   return res.status(200).json({ files });
 });
 
+// Get downloadable files for the user's previous sessions.
 app.post("/getPreviousSessionFiles", async (req, res) =>
 {
   const userSessionId = req.cookies["usid"];
@@ -212,7 +248,7 @@ app.post("/getPreviousSessionFiles", async (req, res) =>
   return res.status(200).json({ previousSessionsFiles });
 });
 
-
+// Generate a signed download URL for an uploaded file (owner-only).
 app.post("/download", async (req, res) => {
   try {
     const fileKey = req.body.fileKey;
@@ -257,7 +293,7 @@ app.post("/download", async (req, res) => {
     const downloadUrl = await getSignedUrl(s3, getObjectCommand, { expiresIn: 3600 });
     
     // Extract filename from fileKey for Content-Disposition
-    const filename = fileKey.split('/').pop() || 'download.webm';
+    const filename = fileKey.split('/').pop() || 'download';
     
     const response = { 
       downloadUrl: downloadUrl,
@@ -270,6 +306,7 @@ app.post("/download", async (req, res) => {
   }
 });
 
+// Create a new audio session for the current user.
 app.post("/create", async (req, res) => {
   const userSessionId = req.cookies["usid"];
 
@@ -293,6 +330,7 @@ app.post("/create", async (req, res) => {
   }
 })
 
+// Verify whether the user can join a session (must not already be in one).
 app.post("/preJoin", async (req, res) => 
 {
   const userSessionId = req.cookies["usid"];
@@ -315,6 +353,7 @@ app.post("/preJoin", async (req, res) =>
 })
 
 
+// Join an existing audio session.
 app.post("/join", async (req, res) => 
   {
     const userSessionId = req.cookies["usid"];
@@ -339,6 +378,7 @@ app.post("/join", async (req, res) =>
   })
 
 
+// Authenticate and set a session cookie.
 app.post("/auth/login", async (req,res) => 
 {
   const { email, password } = req.body;
@@ -351,11 +391,12 @@ app.post("/auth/login", async (req,res) =>
     return res.status(401).json({ error: "Invalid email or password" });
   }
 
-  res.cookie(COOKIE_NAME, sessionId, COOKIE_OPTIONS);
+  res.cookie(COOKIE_NAME, sessionId, getCookieOptions(req));
   return res.status(200).json({ sessionId });
 
 });
 
+// Check username availability.
 app.post("/auth/checkUsername", async (req,res) => 
 {
   const { username } = req.body;
@@ -376,6 +417,7 @@ app.post("/auth/checkUsername", async (req,res) =>
   }
 });
 
+// Create a new account and set a session cookie.
 app.post("/auth/signup", async (req, res) =>
 {
   const {username, email, password} = req.body;
@@ -407,10 +449,61 @@ app.post("/auth/signup", async (req, res) =>
       errors,
     });
   }
-    res.cookie(COOKIE_NAME, result, COOKIE_OPTIONS);
+    res.cookie(COOKIE_NAME, result, getCookieOptions(req));
     return res.status(200).json({ success: true, sessionId: result});
 });
 
+// Send a password reset email if the account exists.
+app.post("/auth/forgotPassword", async (req, res) =>
+{
+  const { email } = req.body;
+  if(!email)
+    return res.status(400).json({ error: "Missing email" });
+  if(!(await verifyEmail(email)))
+    return res.status(400).json({ error: "Invalid email" });
+  const token = await forgotPassword(email);
+  if(!token)
+    return res.status(400).json({ error: "Failed to create reset token" });
+  return res.status(200).json({ success: true});
+});
+
+// Validate a password reset token.
+app.post("/auth/checkResetToken", async (req, res) =>
+{
+  const { email, token } = req.body;
+  if(!email || !token)
+    return res.status(400).json({ error: "Missing email or token" });
+
+  if(!(await verifyEmail(email)))
+    return res.status(400).json({ error: "Invalid email" });
+
+  const result = await checkResetToken(email, token);
+  if (!result) {
+    return res.status(400).json({ error: "Invalid or expired token" });
+  }
+  return res.status(200).json({ success: true, valid: result });
+});
+
+// Reset a password using a valid token.
+app.post("/auth/resetPassword", async (req, res) =>
+{
+  const { email, token, newPassword } = req.body;
+  if(!email || !token || !newPassword)
+    return res.status(400).json({ error: "Missing email, token, or new password" });
+  
+  if(!(await verifyEmail(email)))
+    return res.status(400).json({ error: "Invalid email" });
+  
+  if(!(await verifyPassword(newPassword)))
+    return res.status(400).json({ error: "Invalid new password" });
+  
+  const result = await resetPassword(email, token, newPassword);
+  if (!result)
+    return res.status(400).json({ error: "Failed to reset password" });
+  return res.status(200).json({ success: true, message: "Password reset successful" });
+})
+
+// Log the user out and clear server-side session state.
 app.post("/logout", async (req, res) => 
 {
   const userSessionId = req.cookies.usid;
@@ -431,6 +524,7 @@ app.post("/logout", async (req, res) =>
 
 });
 
+// Check if the current request has a valid logged-in session.
 app.get("/auth/checkLogin", async (req, res) => {
   const userSessionId = req.cookies["usid"];
 
@@ -447,15 +541,16 @@ app.get("/auth/checkLogin", async (req, res) => {
 
 });
 
+// Health check endpoint for ECS/load balancer
+app.get("/health", (req, res) => {
+  res.status(200).send("OK");
+});
 
-function validateWebMFile(file)
-{
-  
-  return true;
-}
 
 // Start server
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => {
-  // Server started
+server.listen(PORT, '0.0.0.0', () => {
+}).on('error', (err) => {
+  console.error('Server error:', err);
+  process.exit(1);
 });

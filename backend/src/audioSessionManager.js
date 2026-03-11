@@ -32,15 +32,13 @@ const ddb = DynamoDBDocumentClient.from(ddbClient, {
 });
 const AUDIO_SESSIONS_TABLE = process.env.AUDIO_SESSION_TABLE_NAME;
 const USER_TABLE = process.env.USER_TABLE_NAME;
-/*
-activeSessions = {
-  "audio-session-id-123": {
-    owner: "user-abc",
-    sockets: new Map([["user-abc", ws], ["user-def", ws]]),
-  }
-}
-*/
 
+/**
+ * Create a new audio session owned by the given user.
+ * @param {string} userId
+ * @param {string} userSessionId
+ * @returns {Promise<string|null>} Newly created session id, or null if user already has an active session.
+ */
 async function createSession(userId, userSessionId)
 {
     const time = new Date().toISOString();
@@ -83,10 +81,17 @@ async function createSession(userId, userSessionId)
     return audioSessionId;
 }
 
+/**
+ * Join an audio session, setting the user's audioSessionId in their user record.
+ * @param {string} userId
+ * @param {string} audioSessionId
+ * @returns {Promise<true|"finished"|null>}
+ */
 async function joinSession(userId, audioSessionId)
 {
     const session = await getSession(audioSessionId);
     if (!session?.Item) return null;
+
     //make sure user can join session
     //const currentUserSession = await getSessionIdFromUser(userId);
 
@@ -99,8 +104,6 @@ async function joinSession(userId, audioSessionId)
 
     if (session.Item.status == "initialized" && !isOwner)
     {
-        //error, not owner of sessios, session is not initialized
-        console.error("Not owner of session, session is not initialized");
         return null;
     }
 
@@ -120,7 +123,7 @@ async function joinSession(userId, audioSessionId)
         }
         catch (err)
         {
-            // Failed to update session status
+            console.error("Failed to update session status:", err);
         }
         
         await setAudioSessionId(userId, audioSessionId);
@@ -156,12 +159,17 @@ async function joinSession(userId, audioSessionId)
     }
     catch (err)
     {
-        // Failed to join session
+        console.error("Failed to join session:", err);
     }
     return null;
 
 }
 
+/**
+ * List and enrich session recordings stored in S3 under recordings/{sessionId}/.
+ * @param {string} sessionId
+ * @returns {Promise<Array<{filename: string, uploader?: string, duration?: string, size?: number}>>}
+ */
 async function listObjectsFromS3(sessionId)
 {
     const prefix = `recordings/${sessionId}/`;
@@ -221,7 +229,11 @@ export async function getSessionFiles(audioSessionId)
 }
 
 
-//Get sessionId if user has one active
+/**
+ * Get the current audio session id from a user record.
+ * @param {string} userId
+ * @returns {Promise<string|null>}
+ */
 export async function getSessionIdFromUser(userId)
 {
     if (!userId) return null;
@@ -246,6 +258,11 @@ export async function getSessionIdFromUser(userId)
     }
 }
 
+/**
+ * Fetch an audio session record by id.
+ * @param {string} sessionId
+ * @returns {Promise<object|null>}
+ */
 async function getSession(sessionId)
 {
     if (!sessionId) return null;
@@ -258,10 +275,17 @@ async function getSession(sessionId)
     }
     catch(err)
     {
-        throw("failed to get session", err);
+        console.error("Failed to get session:", err);
+        return null;
     }
 }
 
+/**
+ * Check if the given user owns the session.
+ * @param {string} userId
+ * @param {string} sessionId
+ * @returns {Promise<boolean>}
+ */
 export async function isOwner(userId, sessionId)
 {
     const session = await getSession(sessionId);
@@ -269,6 +293,11 @@ export async function isOwner(userId, sessionId)
     return session.Item.owner === userId;
 }
 
+/**
+ * Get the owning userId for a session.
+ * @param {string} sessionId
+ * @returns {Promise<string|null>}
+ */
 export async function getOwner(sessionId)
 {
     const session = await getSession(sessionId);
@@ -276,6 +305,12 @@ export async function getOwner(sessionId)
     return session.Item.owner;
 }
 
+/**
+ * Set a user's current audioSessionId.
+ * @param {string} userId
+ * @param {string} audioSessionId
+ * @returns {Promise<void|null>}
+ */
 async function setAudioSessionId(userId, audioSessionId)
 {
     if (!userId || !audioSessionId) return null;
@@ -294,10 +329,31 @@ async function setAudioSessionId(userId, audioSessionId)
     }
     catch(err)
     {
-        // Failed to set audio session id
+        console.error("Failed to set audio session id:", err);
     }
 }
 
+async function getAudioSessionId(userId)
+{
+    if (!userId) return null;
+    try
+    {
+        const result = await ddb.send(new GetCommand({TableName: USER_TABLE, Key: {"user-id": userId}}));
+        if (!result.Item || !result.Item.audioSessionId) return null;
+        return result.Item.audioSessionId;
+    }
+    catch(err)
+    {
+        console.error("Failed to get audio session id:", err);
+        return null;
+    }
+}
+
+/**
+ * Clear a user's audioSessionId.
+ * @param {string} userId
+ * @returns {Promise<void|null>}
+ */
 async function clearAudioSessionId(userId)
 {
     if (!userId) return null;
@@ -313,7 +369,7 @@ async function clearAudioSessionId(userId)
     }
     catch(err)
     {
-        // Failed to clear audio session id
+        console.error("Failed to clear audio session id:", err);
     }
 }
 
@@ -394,7 +450,12 @@ async function leaveAudioSession(userId, reason)
     }
 }
 
-//Closes session removing all references, deletes from ddb if no recordings
+/**
+ * Close a session: disconnect sockets, clear user audioSessionId values, and delete the session record.
+ * If recordings exist, the session id is appended to the owner's previousSessions list.
+ * @param {string} audioSessionId
+ * @returns {Promise<void|null>}
+ */
 async function closeSession(audioSessionId)
 {
     if (!audioSessionId)
@@ -406,16 +467,16 @@ async function closeSession(audioSessionId)
     const sessionData = activeSessions.get(audioSessionId);
     if (!sessionData) return null;
 
-    //Close session since it has recordings
+    // Close all sockets and clear user session IDs without calling leaveAudioSession
     for (const [uid, socket] of sessionData.sockets.entries())
+    {
+        if (socket.readyState === 1) // OPEN
         {
-            if (socket.readyState === socket.OPEN)
-            {
-                socket.close(1000, "Session Closed");
-            }
-
-            leaveAudioSession(uid, "Session Closed");
+            socket.send(JSON.stringify({ type: "removed", reason: "Session Closed" }));
+            socket.close(1000, "Session Closed");
+            await clearAudioSessionId(uid);
         }
+    }
 
     // Clear the mic level broadcast interval if it exists
     if (sessionData.broadcastInterval) {
@@ -478,7 +539,12 @@ async function closeSession(audioSessionId)
 
 
 
-// Check if user has already uploaded
+/**
+ * Check whether a user has uploaded during the current in-memory session.
+ * @param {string} sessionId
+ * @param {string} userId
+ * @returns {Promise<boolean>}
+ */
 export async function hasUserUploaded(sessionId, userId) {
     if (!sessionId || !userId) return false;
     
@@ -487,8 +553,15 @@ export async function hasUserUploaded(sessionId, userId) {
     if (sessionData && sessionData.uploadedRecordings && sessionData.uploadedRecordings.has(userId)) {
         return true;
     }
+    return false;
 }
 
+/**
+ * Mark a user as having uploaded during the current in-memory session.
+ * @param {string} sessionId
+ * @param {string} userId
+ * @returns {Promise<boolean|null>}
+ */
 export async function markUserUploaded(sessionId, userId)
 {
     if (!sessionId || !userId) return null;
@@ -498,6 +571,12 @@ export async function markUserUploaded(sessionId, userId)
     return true;
 }
 
+/**
+ * List previous sessions' files (if they still exist in S3) and generate signed download URLs.
+ * Also prunes `previousSessions` entries that no longer have recordings.
+ * @param {string} userId
+ * @returns {Promise<object|null>}
+ */
 export async function getPreviousSessionsFiles(userId)
 {
     const user = await ddb.send(new GetCommand({TableName: USER_TABLE, Key: {"user-id": userId}}));
@@ -593,22 +672,40 @@ export async function getPreviousSessionsFiles(userId)
     return result;
 }
 
-//exported functions
+/**
+ * Public wrapper to create a new audio session.
+ * @param {string} userId
+ * @param {string} userSessionId
+ */
 export function createAudioSession(userId, userSessionId)
 {
     return createSession(userId, userSessionId);
 }
 
+/**
+ * Public wrapper to fetch an audio session.
+ * @param {string} sessionId
+ */
 export function getAudioSession(sessionId)
 {
     return getSession(sessionId);
 }
 
+/**
+ * Public wrapper to join a session.
+ * @param {string} userId
+ * @param {string} sessionId
+ */
 export function joinAudioSession(userId, sessionId)
 {
     return joinSession(userId, sessionId);
 }
 
+/**
+ * Public wrapper to remove a user from a session.
+ * @param {string} userId
+ * @param {string} reason
+ */
 export async function removeFromAudioSession(userId, reason)
 {
     return await leaveAudioSession(userId, reason);
