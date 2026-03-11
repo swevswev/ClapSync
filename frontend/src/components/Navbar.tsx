@@ -2,6 +2,7 @@ import { LogOut, Menu, X } from "lucide-react";
 import logo from "../assets/cat.jpg";
 import { useState } from "react";
 import { useAuth } from "../contexts/AuthContext";
+import { API_URL } from "../utils/api";
 
 
 export default function Navbar() {
@@ -11,7 +12,7 @@ export default function Navbar() {
   const logout = async() =>
   {
 
-    const res = await fetch("http://localhost:5000/logout",
+    const res = await fetch(`${API_URL}/logout`,
       {
           method: "POST",
           headers: {
@@ -80,7 +81,8 @@ export default function Navbar() {
           >Features
           </a>
 
-          {/* PRICING */}
+          {/*
+          
           <a href="/#pricing" className="text-gray-300 hover:text-white font-semibold text-sm lg:text-base"
           onClick={(e) => 
             {
@@ -97,6 +99,7 @@ export default function Navbar() {
           }
             >Pricing
           </a>
+          */}
 
           {/* Login / Signup */}
           {loggedIn ?
@@ -164,9 +167,11 @@ export default function Navbar() {
           <a href="#about" onClick={() => setMobileMenuOpen(false)} className="block text-gray-300 hover:text-white text-sm lg:text-base"
             >About Us
           </a>
+          {/*
           <a href="#pricing" onClick={() => setMobileMenuOpen(false)} className="block text-gray-300 hover:text-white text-sm lg:text-base"
             >Pricing
           </a>
+          */}
         </div>
       </div>}
       

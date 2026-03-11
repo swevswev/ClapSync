@@ -1,32 +1,29 @@
 import {useEffect, useState, useRef} from "react";
 import {useParams, useLocation} from "react-router-dom";
-import SessionComponent from "../components/SessionComponent";
+import SessionComponent, { type RecordingState } from "../components/SessionComponent";
 import loading from "../assets/loading.jpg";
 import { useNavigate } from "react-router-dom";
-import Waves from "../components/Waves";
-
-const WS_SERVER = import.meta.env.VITE_WS_SERVER || 'ws://localhost:5000';
+import { apiEndpoint, WS_SERVER } from "../utils/api";
 
 export default function SessionPage()
 {
     const { id } = useParams();
     const location = useLocation();
     const [isLoaded, setIsLoaded] = useState(false);
-    const isOwner = location.state?.isOwner ?? false;
     const precheckInputDevice = location.state?.inputDevice as string | undefined;
     const wsRef = useRef<WebSocket | null>(null);
     const [connected, setConnected] = useState(false);
     const [sessionData, setSessionData] = useState<{users: Record<string, string>, self: string, owner: string} | null>(null);
     const [microphoneAccess, setMicrophoneAccess] = useState(false);
-    const [currentMicLevel, setCurrentMicLevel] = useState(0);
+    const [_currentMicLevel, setCurrentMicLevel] = useState(0);
     const [micLevels, setMicLevels] = useState<Record<string, number>>({});
+    const [selfMicLevel, setSelfMicLevel] = useState(0);
     const [pingDelays, setPingDelays] = useState<Record<string, number>>({});
     const sendMicLevelIntervalRef = useRef<number | null>(null);
     const pingIntervalRef = useRef<number | null>(null);
     const [muted, setMuted] = useState(false);
     const mutedRef = useRef(false);
     const [mutedUsers, setMutedUsers] = useState<Record<string, boolean>>({});
-    type RecordingState = "idle" | "countdown" | "recording" | "stopping" | "locked"; 
     const [recordingState, setRecordingState] = useState<RecordingState>("idle");
     const [countdownTime, setCountdownTime] = useState(0);
     const [inputVolume, setInputVolume] = useState<number>(100);
@@ -176,7 +173,8 @@ export default function SessionPage()
                     if (isUploadingRef.current) return;
                     isUploadingRef.current = true;
                     
-                    const audioBlob = new Blob(chunksRef.current, { type: "audio/webm" });
+                    const chunks = [...chunksRef.current];
+                    const audioBlob = new Blob(chunks, { type: "" });
                     await requestUploadFile(audioBlob);
                     
                     isUploadingRef.current = false;
@@ -308,7 +306,8 @@ export default function SessionPage()
                     if (isUploadingRef.current) return;
                     isUploadingRef.current = true;
                     
-                    const audioBlob = new Blob(chunksRef.current, { type: "audio/webm" });
+                    const chunks = [...chunksRef.current];
+                    const audioBlob = new Blob(chunks, { type: "" });
                     await requestUploadFile(audioBlob);
                     
                     isUploadingRef.current = false;
@@ -318,7 +317,8 @@ export default function SessionPage()
                 // Note: This should not happen since device changes are disabled during recording
                 if (wasRecording) {
                     chunksRef.current = []; // Reset chunks for new recording
-                    mediaRecorderRef.current.start();
+                    // Start with timeslice to ensure data is collected periodically (every 1 second)
+                    mediaRecorderRef.current.start(1000);
                 }
             }
         }
@@ -364,30 +364,16 @@ export default function SessionPage()
         // Add new sample to the list
         serverTimeOffsetList.current.push({ delay, offset: estimatedOffset });
 
-        // Keep only MAX_OFFSET_SAMPLES samples by removing the one with largest delay
+        // Keep only MAX_OFFSET_SAMPLES samples (simple moving average window)
         if (serverTimeOffsetList.current.length > MAX_OFFSET_SAMPLES) {
-            // Find the index of the sample with the largest delay
-            let maxDelayIndex = 0;
-            let maxDelay = serverTimeOffsetList.current[0].delay;
-            for (let i = 1; i < serverTimeOffsetList.current.length; i++) {
-                if (serverTimeOffsetList.current[i].delay > maxDelay) {
-                    maxDelay = serverTimeOffsetList.current[i].delay;
-                    maxDelayIndex = i;
-                }
-            }
-            // Remove the sample with the largest delay
-            serverTimeOffsetList.current.splice(maxDelayIndex, 1);
+            // Remove the oldest sample (FIFO)
+            serverTimeOffsetList.current.shift();
         }
 
-        // Find the sample with the lowest delay
+        // Calculate simple moving average of offsets
         if (serverTimeOffsetList.current.length > 0) {
-            const lowestDelaySample = serverTimeOffsetList.current.reduce((min, sample) => 
-                sample.delay < min.delay ? sample : min
-            );
-            
-            // Set the offset ref to the offset of the lowest delay sample
-            serverTimeOffsetRef.current = lowestDelaySample.offset;
-            console.log("Server time offset:", serverTimeOffsetRef.current);
+            const sum = serverTimeOffsetList.current.reduce((acc, sample) => acc + sample.offset, 0);
+            serverTimeOffsetRef.current = sum / serverTimeOffsetList.current.length;
         }
     }
 
@@ -552,7 +538,7 @@ export default function SessionPage()
     {
         console.log("[Frontend] downloadFile called with filename:", filename);
         try {
-            const response = await fetch("http://localhost:5000/download", {
+            const response = await fetch(apiEndpoint("download"), {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -594,7 +580,9 @@ export default function SessionPage()
 
     async function requestUploadFile(blob: Blob)
     {
-        if (!blob || recordingState === "recording") return;
+        console.log("requestUploadFile called with blob:", blob);
+
+        if (!blob) return;
         try
         {
             // Check file size on client side (in bytes)
@@ -623,7 +611,7 @@ export default function SessionPage()
             formData.append("file", blob, "recording.webm");
             formData.append("duration", duration.toString()); // Send duration as string
             
-            const uploadResponse = await fetch("http://localhost:5000/upload", 
+            const uploadResponse = await fetch(apiEndpoint("upload"), 
             {
             method: "POST",
             body: formData,
@@ -715,12 +703,50 @@ export default function SessionPage()
                             if (!mediaRecorderRef.current) {
                                 await getMicrophoneAccess();
                             }
+                            
+                            // Ensure audio graph is connected
+                            if (!sourceRef.current || !gainNodeRef.current || !destinationRef.current) {
+                                await getMicrophoneAccess();
+                            }
+                            
+                            // Verify destination stream has active tracks
+                            const destinationStream = destinationRef.current?.stream;
+                            if (!destinationStream || destinationStream.getAudioTracks().length === 0) {
+                                console.error("Destination stream has no audio tracks, reinitializing...");
+                                await getMicrophoneAccess();
+                            }
+                            
+                            // Recreate MediaRecorder if needed to ensure it uses the current destination stream
+                            if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "recording" && destinationStream) {
+                                // Check if MediaRecorder is using the correct stream
+                                const currentStream = (mediaRecorderRef.current as any).stream;
+                                if (currentStream !== destinationStream) {
+                                    console.log("Recreating MediaRecorder with current destination stream");
+                                    mediaRecorderRef.current = new MediaRecorder(destinationStream);
+                                    chunksRef.current = [];
+                                    mediaRecorderRef.current.ondataavailable = (event: BlobEvent) => {
+                                        if (event.data.size > 0) chunksRef.current.push(event.data);
+                                    };
+                                    mediaRecorderRef.current.onstop = async () => {
+                                        if (isUploadingRef.current) return;
+                                        isUploadingRef.current = true;
+                                        const chunks = [...chunksRef.current];
+                                        const audioBlob = new Blob(chunks, { type: "" });
+                                        await requestUploadFile(audioBlob);
+                                        isUploadingRef.current = false;
+                                    };
+                                }
+                            }
+                            
                             const mr = mediaRecorderRef.current;
+
+                            console.log("MediaRecorder state:", mr?.state);
                             if (!mr || mr.state === "recording") return;
 
                             // Reset chunks right before we start
                             chunksRef.current = [];
-                            mr.start();
+                            // Start with timeslice to ensure data is collected periodically (every 1 second)
+                            mr.start(1000);
                             recordingStartTimestampRef.current = Date.now(); // Track when recording actually starts
                             setRecordingState("recording");
                             startRecordingTimeoutRef.current = null;
@@ -748,9 +774,18 @@ export default function SessionPage()
                             stopRecordingTimeoutRef.current = window.setTimeout(() => {
                                 const mr = mediaRecorderRef.current;
                                 if (mr && mr.state === "recording") {
-                                    mr.stop();
+                                    try {
+                                        mr.requestData();
+                                    } catch (_) { /* requestData not supported or invalid state */ }
+                                    setTimeout(() => {
+                                        try {
+                                            mr.stop();
+                                        } catch (_) { /* ignore */ }
+                                        setRecordingState("idle");
+                                    }, 100);
+                                } else {
+                                    setRecordingState("idle");
                                 }
-                                setRecordingState("idle");
                                 stopRecordingTimeoutRef.current = null;
                             }, timeUntilStop);
                         }
@@ -891,12 +926,28 @@ export default function SessionPage()
 
     useEffect(() => {
         // Update input device when selectedInputDevice changes (only if we have mic access and a valid device)
-        // Don't update device during recording as it would stop the MediaRecorder
-        const isRecording = recordingState === "recording" || recordingState === "countdown";
-        if (selectedInputDevice && microphoneAccess && streamRef.current && !isRecording) {
+        // Don't update device during recording OR while stopping (stopping still needs chunksRef for upload)
+        const isRecordingOrStopping = recordingState === "recording" || recordingState === "countdown" || recordingState === "stopping";
+        if (selectedInputDevice && microphoneAccess && streamRef.current && !isRecordingOrStopping) {
+            console.log("Updating input device to:", selectedInputDevice);
             updateInputDevice(selectedInputDevice);
         }
     }, [selectedInputDevice, microphoneAccess, recordingState]);
+
+    useEffect(() => {
+        const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+            if (recordingState === "stopping" || recordingState === "recording" || isUploadingRef.current) {
+                event.preventDefault();
+                // Chrome requires returnValue to be set.
+                event.returnValue = "";
+            }
+        };
+
+        window.addEventListener("beforeunload", handleBeforeUnload);
+        return () => {
+            window.removeEventListener("beforeunload", handleBeforeUnload);
+        };
+    }, [recordingState]);
 
     useEffect(() => {
         // Listen for device changes
@@ -920,8 +971,44 @@ export default function SessionPage()
         };
     }, []);
 
+    useEffect(() => {
+        if (!sessionData) return;
+        const level = micLevels[sessionData.self] ?? 0;
+        setSelfMicLevel(prev => prev * 0.7 + level * 0.3);
+    }, [micLevels, sessionData]);
+
+    const normalizedSelfLevel = Math.min(Math.max(selfMicLevel / 255, 0), 1);
+    const pulseScale = 1 + normalizedSelfLevel * 0.35;
+    const glowOpacity = 0.4 + normalizedSelfLevel * 0.3;
+    const isCountdownOrRecording = recordingState === "countdown" || recordingState === "recording";
+
     return (
-        <div className="min-h-screen bg-slate-900 text-white overflow-hidden">
+        <div className="relative min-h-screen bg-slate-900 text-white overflow-hidden">
+            <div
+                className="pointer-events-none absolute -bottom-80 left-1/2 w-[1500px] h-[1500px]"
+                style={{
+                    transform: `translateX(-50%) scale(${pulseScale})`,
+                    transition: "transform 120ms ease-out",
+                }}
+            >
+                {/* Base blue-gray glow */}
+                <div
+                    className="absolute inset-0"
+                    style={{
+                        background: `radial-gradient(circle at center, rgba(41,53,80,${glowOpacity}), transparent 70%)`,
+                    }}
+                />
+                {/* Red overlay: fades in during countdown/recording */}
+                <div
+                    className="absolute inset-0"
+                    style={{
+                        background: `radial-gradient(circle at center, rgba(110,28,28,${glowOpacity}), transparent 70%)`,
+                        opacity: isCountdownOrRecording ? 1 : 0,
+                        transition: "opacity 600ms ease-out",
+                    }}
+                />
+            </div>
+            
             {isLoaded && sessionData ? <SessionComponent sessionData={sessionData} audioSessionId={id || ""} micLevels={micLevels} muted={muted} recordingState={recordingState} countdownTime={countdownTime} setMuted={setMuted} kickUser={kickUser} mutedUsers={mutedUsers} pingDelays={pingDelays} startRecording={startRecording} stopRecording={stopRecording} inputVolume={inputVolume} setInputVolume={setInputVolume} inputDevices={inputDevices} selectedInputDevice={selectedInputDevice} setSelectedInputDevice={setSelectedInputDevice} downloadFile={downloadFile} /> : <div className="flex flex-col items-center justify-center h-screen space-y-4">
                 <img src={loading} alt="Loading" className="w-40 h-40 animate-in slide-in-from-bottom duration-2000 delay-500" />
                 <div className="flex flex-row items-center space-x-8">

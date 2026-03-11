@@ -33,6 +33,8 @@ export default function Precheck({ onAverageChange, audioSessionId, mode }: Prec
     const delayNodeRef = useRef<DelayNode | null>(null);
     const echoSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
     const echoConnectedRef = useRef<boolean>(false);
+    const audioElementRef = useRef<HTMLAudioElement | null>(null);
+    const destinationStreamRef = useRef<MediaStream | null>(null);
 
 
     useEffect(() => {
@@ -56,6 +58,20 @@ export default function Precheck({ onAverageChange, audioSessionId, mode }: Prec
                 contextRef.current = new AudioContext();
             }
             const context = contextRef.current;
+
+            // Create audio element for output device selection (create early so it's available)
+            if (!audioElementRef.current) {
+                const audio = document.createElement('audio');
+                audio.autoplay = true;
+                audio.style.display = 'none';
+                document.body.appendChild(audio);
+                audioElementRef.current = audio;
+                
+                // Create a silent audio stream to test output device
+                const destination = context.createMediaStreamDestination();
+                destinationStreamRef.current = destination.stream;
+                audio.srcObject = destination.stream;
+            }
 
             if (sourceRef.current) {
                 sourceRef.current.disconnect();
@@ -137,10 +153,26 @@ export default function Precheck({ onAverageChange, audioSessionId, mode }: Prec
         console.log("echo: ", newEchoState);
 
         if (newEchoState) {
+            // Ensure audio element exists (should already exist from getMicrophoneAccess)
+            if (!audioElementRef.current) {
+                const audio = document.createElement('audio');
+                audio.autoplay = true;
+                audio.style.display = 'none';
+                document.body.appendChild(audio);
+                audioElementRef.current = audio;
+            }
+
+            // Create MediaStreamDestination to route echo audio through the audio element
+            const destination = context.createMediaStreamDestination();
+            destinationStreamRef.current = destination.stream;
+            if (audioElementRef.current) {
+                audioElementRef.current.srcObject = destination.stream;
+            }
+
             // Turn echo ON
             if (!delayNodeRef.current) {
                 delayNodeRef.current = context.createDelay(5);
-                delayNodeRef.current.delayTime.value = 0.5; // 300ms delay - adjust as needed
+                delayNodeRef.current.delayTime.value = 0.5; // 500ms delay
             }
             
             // Always recreate echo source against the latest stream
@@ -151,7 +183,8 @@ export default function Precheck({ onAverageChange, audioSessionId, mode }: Prec
             
             if (!echoConnectedRef.current && delayNodeRef.current) {
                 echoSourceRef.current?.connect(delayNodeRef.current);
-                delayNodeRef.current.connect(context.destination);
+                // Connect delay node to MediaStreamDestination (which routes to audio element)
+                delayNodeRef.current.connect(destination);
                 echoConnectedRef.current = true;
             }
         } else {
@@ -160,6 +193,12 @@ export default function Precheck({ onAverageChange, audioSessionId, mode }: Prec
                 delayNodeRef.current.disconnect();
                 echoConnectedRef.current = false;
             }
+            
+            // Clean up audio element when echo is off (optional - can keep it for output device testing)
+            // if (audioElementRef.current) {
+            //     audioElementRef.current.remove();
+            //     audioElementRef.current = null;
+            // }
         }
     }
 
@@ -236,21 +275,53 @@ export default function Precheck({ onAverageChange, audioSessionId, mode }: Prec
         }
     }
 
-    function updateOutputDevice(deviceId: string)
+    async function updateOutputDevice(deviceId: string)
     {
         console.log("updating output device: ", deviceId);
 
-        const audioElement = document.querySelector('audio');
-        if (!audioElement) return;
+        // Use the audio element ref if it exists, otherwise try to find one
+        const audioElement = audioElementRef.current || document.querySelector('audio') as HTMLAudioElement;
+        if (!audioElement) {
+            console.warn("No audio element found for output device selection");
+            return;
+        }
+
         try
-        {  
-            audioElement.setSinkId(deviceId);
-            console.log("output device updated: ", deviceId);
+        {
+            // setSinkId requires the deviceId to be a valid device ID or 'default'
+            const sinkId = deviceId === "default" ? "default" : deviceId;
+            
+            // Check if setSinkId is supported
+            if ('setSinkId' in HTMLAudioElement.prototype) {
+                await (audioElement as any).setSinkId(sinkId);
+                console.log("output device updated: ", sinkId);
+            } else {
+                console.warn("setSinkId is not supported in this browser");
+            }
         }
         catch (error)
         {
             console.error("Error updating output device: ", error);
         }
+    }
+
+    function extractSessionId(input: string): string {
+        if (!input) return "";
+        
+        // Try to match URL patterns like:
+        // - https://clapsync.live/session/ab0698ce4e
+        // - http://clapsync.live/session/ab0698ce4e
+        // - clapsync.live/session/ab0698ce4e
+        // - /session/ab0698ce4e
+        const urlPattern = /(?:\/session\/|session\/)([a-zA-Z0-9]+)/;
+        const match = input.match(urlPattern);
+        
+        if (match && match[1]) {
+            return match[1];
+        }
+        
+        // If no URL pattern found, assume the entire input is the session ID
+        return input.trim();
     }
 
     async function ready()
@@ -287,6 +358,16 @@ export default function Precheck({ onAverageChange, audioSessionId, mode }: Prec
     useEffect(() => {
         updateOutputDevice(outputDevice);
     }, [outputDevice]);
+
+    // Cleanup audio element on unmount
+    useEffect(() => {
+        return () => {
+            if (audioElementRef.current) {
+                audioElementRef.current.remove();
+                audioElementRef.current = null;
+            }
+        };
+    }, []);
 
     return(
         <section className="relative min-h-screen flex items-center justify-center pt-16 sm:pt-20 px-6 sm:px-8 lg:px-12 overflow-hidden"> 
@@ -355,7 +436,7 @@ export default function Precheck({ onAverageChange, audioSessionId, mode }: Prec
                                 type="text" 
                                 placeholder="Join Link" 
                                 value={link}
-                                onChange={(e) => setLink(e.target.value)}
+                                onChange={(e) => setLink(extractSessionId(e.target.value))}
                                 className="w-full px-3 py-2 border border-gray-300 text-gray-300 rounded-full focus:outline-none focus:ring-1 focus:ring-blue-400" 
                             />
                             <Link className="w-6 h-6 text-gray-300"/>

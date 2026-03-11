@@ -1,5 +1,7 @@
-import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from "react";
+import { createContext, useContext, useState, useEffect, useCallback } from "react";
+import type { ReactNode } from "react";
 import { useLocation } from "react-router-dom";
+import { API_URL } from "../utils/api";
 
 interface AuthContextType {
   loggedIn: boolean;
@@ -22,7 +24,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const checkLoginStatus = useCallback(async () => {
     try {
-      const response = await fetch("http://localhost:5000/auth/checkLogin", { credentials: "include" });
+      const response = await fetch(`${API_URL}/auth/checkLogin`, { credentials: "include" });
       const data = await response.json();
       console.log(data);
       if (data.success === true) {

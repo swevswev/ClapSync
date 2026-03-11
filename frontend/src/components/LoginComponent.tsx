@@ -1,7 +1,8 @@
-import { redirect, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useState} from "react";
 import { CircleAlert, LoaderCircle } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
+import { API_URL } from "../utils/api";
 
 
 export default function LoginComponent()
@@ -10,6 +11,7 @@ export default function LoginComponent()
     const { setLoggedIn, checkLoginStatus } = useAuth();
 
     const [email, setEmail] = useState("");
+    const [emailError, setEmailError] = useState("");
     const [password, setPassword] = useState("");
     const [error, setError] = useState(false);
     const [loading, setLoading] = useState(false);
@@ -22,7 +24,7 @@ export default function LoginComponent()
 
         try
         {
-            const res = await fetch("http://localhost:5000/auth/login",
+            const res = await fetch(`${API_URL}/auth/login`,
             {
                 method: "POST",
                 headers: {
@@ -55,6 +57,47 @@ export default function LoginComponent()
         
     }
 
+    const ForgotPassword = async () => {
+        if (!email) {
+            setEmailError("Please enter your email");
+            return;
+        }
+
+
+        if (!(/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
+            setEmailError("Please enter a valid email");
+            return;
+        }
+
+        setEmailError("");
+
+        try
+        {
+            const res = await fetch(`${API_URL}/auth/forgotPassword`,
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ email }),
+            });
+
+            const data = await res.json();
+            if (!res.ok) {
+                setEmailError(data.error || "Failed to send reset email. Please try again.");
+                return;
+            }
+
+            setEmailError("Reset email sent to " + email + ". Check your inbox for a reset link.");
+        }
+        catch (err)
+        {
+            setEmailError("Failed to send reset email. Please try again.");
+            return;
+        }
+        
+    }
+
 
     return(
         <section className="relative min-h-screen flex items-center justify-center pt-16 sm:pt-20 px-4 sm:px-6 lg:px-8 overflow-hidden"> 
@@ -74,12 +117,12 @@ export default function LoginComponent()
                         placeholder="you@example.com"
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
-                        onFocus={() => setError(false)}
-                        className={`w-full px-4 py-2 border ${error? ("border-red-500") : ("border-gray-300")} text-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400`}
+                        onFocus={() => {setError(false); setEmailError("")}}
+                        className={`w-full px-4 py-2 border ${error || emailError !== "" ? ("border-red-500") : ("border-gray-300")} text-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400`}
                     />
-                    {error && <div className="flex flex-row items-center mt-0.5 space-x-0.5">
+                    {(error || emailError !== "") && <div className="flex flex-row items-center mt-0.5 space-x-0.5">
                         <CircleAlert color="red" size="12"/>
-                        <p className="text-red-500 text-xs -mt-0.5"> Login or password is invalid. </p>    
+                        <p className="text-red-500 text-xs -mt-0.5"> {error ? "Login or password is invalid." : emailError} </p>    
                     </div>}
                 </div>
 
@@ -104,7 +147,7 @@ export default function LoginComponent()
                 </div>
 
                 {/* forgot password? */}
-                <button className="text-blue-400/90 text-sm -mt-2.5 cursor-pointer hover:underline">
+                <button className="text-blue-400/90 text-sm -mt-2.5 cursor-pointer hover:underline" onClick={ForgotPassword}>
                     Forgot password?
                 </button>
 

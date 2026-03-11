@@ -1,5 +1,4 @@
 import { Check, Flame } from "lucide-react";
-import Features from "./Features";
 
 const plans =
 [

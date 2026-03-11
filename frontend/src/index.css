@@ -16,13 +16,27 @@
         animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1); 
     }
 
+    .slide-in-from-top-right {
+        animation-name: slideInFromTopRight;
+        animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
     .animate-dot-pulse {
         animation-name: dotPulse;
         animation-timing-function: ease-in-out;
     }
 
+    .animate-rocking {
+        animation-name: rocking;
+        animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
     .duration-300 {
         animation-duration: 300ms;
+    }
+
+    .duration-700 {
+        animation-duration: 700ms;
     }
 
     .duration-1000 {
@@ -54,10 +68,68 @@
     {
         animation-delay: 600ms;
     }
-
+    .delay-800
+    {
+        animation-delay: 800ms;
+    }
+    .delay-1000
+    {
+        animation-delay: 1000ms;
+    }
+    .delay-1200
+    {
+        animation-delay: 1200ms;
+    }
+    .delay-1400
+    {
+        animation-delay: 1400ms;
+    }
+    .delay-1600
+    {
+        animation-delay: 1600ms;
+    }
+    .delay-1800
+    {
+        animation-delay: 1800ms;
+    }
+    .delay-2000
+    {
+        animation-delay: 2000ms;
+    }
     .animate-infinite {
         animation-iteration-count: infinite;
     }
+
+    .animate-mouse-move {
+        animation: mouseMoveClick 3200ms cubic-bezier(0.16, 1, 0.3, 1) infinite;
+    }
+
+    .text-shadow-xl {
+        text-shadow: 0 0 18px rgba(15, 23, 42, 0.9);
+    }
+}
+
+.fade-right-edge
+{
+    /* Fade both left and right edges so wide content can extend behind text */
+    -webkit-mask-image: linear-gradient(
+        to right,
+        transparent 0%,
+        #000 12%,
+        #000 88%,
+        transparent 100%
+    );
+    mask-image: linear-gradient(
+        to right,
+        transparent 0%,
+        #000 12%,
+        #000 88%,
+        transparent 100%
+    );
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+    -webkit-mask-size: 100% 100%;
+    mask-size: 100% 100%;
 }
 
 @keyframes slideInFromBottom
@@ -86,6 +158,19 @@
     }
 }
 
+@keyframes slideInFromTopRight
+{
+    from {
+        opacity: 0;
+        transform: translate(1rem, -10rem) scale(0.96) rotateZ(1.5deg);
+    }
+
+    to {
+        opacity: 1;
+        transform: translate(0, 0) scale(1) rotateZ(0deg);
+    }
+}
+
 @keyframes dotPulse
 {
     0%, 100% {
@@ -95,5 +180,117 @@
     50% {
         opacity: 1;
         transform: scale(1.5);
+    }
+}
+
+@keyframes rocking
+{
+    0%, 100% {
+        transform: rotate(-5deg);
+    }
+    50% {
+        transform: rotate(5deg);
+    }
+}
+
+@keyframes countdownIn
+{
+    from {
+        opacity: 0;
+        transform: translateY(-0.75rem);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes countdownOut
+{
+    from {
+        opacity: 1;
+        transform: translateY(0);
+    }
+    to {
+        opacity: 0;
+        transform: translateY(0.75rem);
+    }
+}
+
+.animate-countdown-in {
+    animation: countdownIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-countdown-out {
+    animation: countdownOut 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes recordingTimeIn {
+    from {
+        opacity: 0;
+        transform: scale(1.25);
+        letter-spacing: 0.2em;
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+        letter-spacing: 0.05em;
+    }
+}
+
+.animate-recording-time-in {
+    animation: recordingTimeIn 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+
+.mock-perspective {
+    perspective: 1000px;
+    perspective-origin: right center;
+}
+
+.mock-tilt-right {
+    transform-origin: center right;
+    transform: rotateY(14deg) rotateX(4deg);
+}
+
+.mock-tilt-left {
+    transform-origin: center left;
+    transform: rotateY(-10deg) rotateX(20deg);
+}
+
+/* Hide scrollbar while keeping scroll (e.g. home page) */
+.scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+    display: none;
+}
+
+@keyframes mouseMoveClick
+{
+    0% {
+        opacity: 0;
+        transform: translate(0px, 0px) scale(1);
+    }
+    15% {
+        opacity: 1;
+        transform: translate(0px, 0px) scale(1);
+    }
+    45% {
+        opacity: 1;
+        transform: translate(155px, 130px) scale(1);
+    }
+    55% {
+        opacity: 1;
+        transform: translate(155px, 130px) scale(1.2);
+    }
+    65% {
+        opacity: 1;
+        transform: translate(155px, 130px) scale(1);
+    }
+    100% {
+        opacity: 0;
+        transform: translate(100px, 95px) scale(1);
     }
 }

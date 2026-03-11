@@ -1,7 +1,8 @@
-import { Copy, Crown, LogOut, Play, Users, Pause, Square, Download, SignalHigh, SignalMedium, SignalLow, SignalZero, Mic, ArrowDownToLine, MicOff, Scissors, UserX } from "lucide-react";
+import { Copy, Crown, LogOut, Play, Users, Square, Download, SignalHigh, SignalMedium, SignalLow, SignalZero, Mic, ArrowDownToLine, MicOff, UserX } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import waiting from "../assets/waiting.png";
+import { API_URL } from "../utils/api";
 
 interface SessionData {
     users: Record<string, string>; // localId -> username
@@ -9,7 +10,7 @@ interface SessionData {
     owner: string;
 }
 
-type RecordingState = "idle" | "countdown" | "recording" | "stopping";
+export type RecordingState = "idle" | "countdown" | "recording" | "stopping" | "locked";
 
 interface SessionComponentProps {
     sessionData: SessionData;
@@ -35,12 +36,14 @@ interface SessionComponentProps {
 export default function SessionComponent({ sessionData, audioSessionId, micLevels, muted, setMuted, kickUser, startRecording, stopRecording, mutedUsers, recordingState, countdownTime, pingDelays, inputVolume, setInputVolume, inputDevices, selectedInputDevice, setSelectedInputDevice, downloadFile }: SessionComponentProps)
 {
     const navigate = useNavigate();
-    const [isOwner, setIsOwner] = useState(true);
+    const isOwner = sessionData.self === sessionData.owner;
 
     const [copied, setCopied] = useState(false);
     const [downloadsPanelOpen, setDownloadsPanelOpen] = useState(false);
     const [downloadFiles, setDownloadFiles] = useState<Array<{filename: string, uploader: string, duration: string, size: number}>>([]);
     const [displayCountdown, setDisplayCountdown] = useState(0);
+    const [leavingCountdown, setLeavingCountdown] = useState<number | null>(null);
+    const lastCountdownRef = useRef<number | null>(null);
     const [displayRecordingTime, setDisplayRecordingTime] = useState("00:00:00");
 
     let startTimeRef = useRef(0);
@@ -83,6 +86,22 @@ export default function SessionComponent({ sessionData, audioSessionId, micLevel
 
         return () => clearInterval(interval);
     }, [recordingState, countdownTime]);
+
+    // When displayCountdown changes, run leave animation for previous value
+    useEffect(() => {
+        if (recordingState !== "countdown") {
+            lastCountdownRef.current = null;
+            setLeavingCountdown(null);
+            return;
+        }
+        const prev = lastCountdownRef.current;
+        lastCountdownRef.current = displayCountdown;
+        if (prev !== null && prev !== displayCountdown) {
+            setLeavingCountdown(prev);
+            const t = setTimeout(() => setLeavingCountdown(null), 400);
+            return () => clearTimeout(t);
+        }
+    }, [recordingState, displayCountdown]);
 
     // Update recording time when recording
     useEffect(() => {
@@ -135,7 +154,7 @@ export default function SessionComponent({ sessionData, audioSessionId, micLevel
         
         console.log("[Frontend] Making request to /getFiles");
         try {
-            const response = await fetch("http://localhost:5000/getFiles", {
+            const response = await fetch(`${API_URL}/getFiles`, {
                 method: "POST",
                 credentials: "include",
             });
@@ -246,43 +265,58 @@ export default function SessionComponent({ sessionData, audioSessionId, micLevel
             
             <div>
                 {/* Downloads Panel */}
-                <div className={`flex flex-col absolute top-16 right-4 rounded-lg z-10 transition-all duration-500 ease-in-out border-gray-700 bg-slate-900 overflow-hidden ${downloadsPanelOpen ? "w-sm h-[240px] border-1" : "w-0 h-0 bg-transparent border-0"}`}>
+                <div className={`flex flex-col absolute top-16 right-4 rounded-lg z-10 transition-all duration-500 ease-in-out border-gray-700 bg-slate-900 overflow-hidden ${downloadsPanelOpen ? "w-sm h-[240px] border-1" : "w-0 h-0 bg-transparent border-0"} ${isOwner ? "" : "hidden"}`}>
                     {downloadsPanelOpen && (
                         <>
                             <div className="flex flex-col h-full">
-                                <div className="flex-shrink-0 pt-2 pb-2 px-2">
-                                    <span className="text-gray-200 text-md font-bold">Downloads</span>
+                                <div className="flex-shrink-0 px-3 py-2 border-b border-gray-700/80 flex items-center justify-between">
+                                    <span className="text-gray-100 text-sm font-semibold tracking-wide">Downloads</span>
+                                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-gray-900/70 text-gray-300 border border-gray-600">
+                                        {downloadFiles.length} file{downloadFiles.length === 1 ? "" : "s"}
+                                    </span>
                                 </div>
                                 <div className="flex-1 overflow-y-auto w-full downloads-scroll">
                                     <div className="flex flex-col items-center justify-start space-y-1 px-2 pb-2">
                                         {downloadFiles.length > 0 ? (
-                                            downloadFiles.map((file, index) => (
-                                                <div onClick={() => {
-                                                    console.log("[SessionComponent] File clicked:", file.filename);
-                                                    console.log("[SessionComponent] downloadFile prop:", typeof downloadFile);
-                                                    if (downloadFile) {
-                                                        downloadFile(file.filename);
-                                                    } else {
-                                                        console.error("[SessionComponent] downloadFile prop is not defined!");
-                                                    }
-                                                }} key={index} className="w-full h-auto min-h-[60px] flex flex-row items-center justify-between space-x-2 px-2 cursor-pointer border-b-1 border-b-blue-100 hover:bg-gray-800/50 group"> 
-                                                    <div className="flex flex-col items-start justify-start space-y-1 flex-1 min-w-0">
-                                                        <div className="flex flex-row items-center justify-center space-x-2"> 
-                                                            <span className="text-gray-200 text-sm font-medium underline truncate w-full" title={file.filename.split('/').pop() || `File ${index + 1}`}>
-                                                                {file.filename.split('/').pop() || `File ${index + 1}`}
-                                                            </span>
-                                                            <span className="text-gray-200/70 text-xs font-thin">
-                                                                {file.duration ? formatTime(parseFloat(file.duration)) : "N/A"}
-                                                            </span>
-                                                        </div>
+                                            downloadFiles.map((file, index) => {
+                                                const filenameOnly = file.filename.split('/').pop() || `File ${index + 1}`;
+                                                const durationLabel = file.duration ? formatTime(parseFloat(file.duration)) : "N/A";
+                                                const sizeLabel = file.size ? `${(file.size / 1024 / 1024).toFixed(2)} MB` : "N/A";
 
-                                                        <span className="text-gray-200/70 text-xs font-thin">
-                                                            {file.size ? (file.size / 1024 / 1024).toFixed(2) : "N/A"} MB
-                                                        </span>
+                                                return (
+                                                    <div
+                                                        key={index}
+                                                        onClick={() => {
+                                                            console.log("[SessionComponent] File clicked:", file.filename);
+                                                            console.log("[SessionComponent] downloadFile prop:", typeof downloadFile);
+                                                            if (downloadFile) {
+                                                                downloadFile(file.filename);
+                                                            } else {
+                                                                console.error("[SessionComponent] downloadFile prop is not defined!");
+                                                            }
+                                                        }}
+                                                        className="w-full min-h-[64px] flex flex-row items-center justify-between gap-3 px-3 py-2 cursor-pointer rounded-md border border-transparent hover:border-blue-400/60 hover:bg-gray-800/70 group transition-colors duration-150"
+                                                    >
+                                                        <div className="flex flex-col items-start justify-center gap-1 flex-1 min-w-0">
+                                                            <span
+                                                                className="text-gray-100 text-sm font-medium truncate"
+                                                                title={filenameOnly}
+                                                            >
+                                                                {filenameOnly}
+                                                            </span>
+                                                            <div className="flex flex-row items-center gap-3 text-xs text-gray-300/80">
+                                                                <span className="whitespace-nowrap">
+                                                                    Duration: <span className="font-semibold text-gray-100">{durationLabel}</span>
+                                                                </span>
+                                                                <span className="whitespace-nowrap">
+                                                                    Size: <span className="font-semibold text-gray-100">{sizeLabel}</span>
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                        <ArrowDownToLine className="w-5 h-5 text-gray-200 opacity-60 group-hover:opacity-100 transition-opacity duration-150 flex-shrink-0 pointer-events-none" />
                                                     </div>
-                                                    <ArrowDownToLine className="w-5 h-5 text-gray-200 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex-shrink-0 pointer-events-none" />
-                                                </div>
-                                            ))
+                                                );
+                                            })
                                         ) : (
                                             <span className="text-gray-400 text-xs px-2 py-4">No files available</span>
                                         )}
@@ -297,7 +331,7 @@ export default function SessionComponent({ sessionData, audioSessionId, micLevel
 
             <div className= "w-full max-w-5xl mx-auto flex flex-col md:flex-row items-center relative">
                 {/* Participants Panel */}
-                <div className="w-full max-w-2xl md:w-xs h-108 bg-gray-800/50 border-1 border-gray-700 rounded-lg flex flex-col">
+                <div className="w-full max-w-2xl md:w-xs h-108 bg-gray-800/50 border-1 border-gray-700 rounded-lg flex flex-col shadow-xl">
                     <div className="flex flex-row items-center justify-center space-x-2 pt-2 px-2 pb-2">
                         <Users className="w-5 h-5 text-blue-400" />
                         <span className="text-white text-lg font-bold">Participants ({Object.keys(sessionData.users).length}/5)</span>
@@ -351,25 +385,45 @@ export default function SessionComponent({ sessionData, audioSessionId, micLevel
                     </div>
 
                     {/* Session Display */}
-                    <div className="w-full h-108 bg-gray-800/50 border-1 border-gray-700  rounded-lg flex justify-center items-center">
+                    <div className={`w-full h-108 bg-gray-800/50 border-1 border-gray-700  rounded-lg flex justify-center items-center shadow-xl `}>
                         {recordingState === "countdown" ? (
-                            <div className="flex flex-row justify-center items-center space-x-2">
-                                <span className="text-gray-200 text-4xl font-semibold">Starting in: {displayCountdown}s</span>
+                            <div className="flex flex-col space-y-4 justify-center items-center text-center">
+                                <span className="text-gray-200 text-2xl sm:text-3xl font-semibold shadow-xl">Going live in:</span>
+                                <div className="relative h-14 flex justify-center items-center overflow-hidden">
+                                    {leavingCountdown !== null && (
+                                        <span key={`out-${leavingCountdown}`} className="absolute text-gray-200 text-5xl sm:text-6xl font-semibold tabular-nums animate-countdown-out">
+                                            {leavingCountdown}
+                                        </span>
+                                    )}
+                                    <span key={displayCountdown} className="text-gray-200 text-5xl sm:text-6xl font-semibold tabular-nums text-shadow-xl animate-countdown-in">
+                                        {displayCountdown}
+                                    </span>
+                                </div>
                             </div>
                         ) : recordingState === "recording" ? (
                             <div className="flex flex-row justify-center items-center space-x-2">
-                                <span className="text-gray-200 text-4xl font-semibold">Recording: {displayRecordingTime}</span>
+                                <span className="text-gray-200 text-6xl font-semibold tracking-[0.05em] text-shadow-xl tabular-nums animate-recording-time-in">{displayRecordingTime}</span>
                             </div>
                         ) : recordingState === "stopping" ? (
-                            <div className="flex flex-row justify-center items-center space-x-2">
-                                <span className="text-gray-200 text-4xl font-semibold">Stopping...</span>
+                            <div className="flex flex-col justify-center items-center space-y-4">
+                                <span className="text-gray-200 text-4xl font-semibold">Stopping recording</span>
+                                <div className="flex flex-row justify-center items-center space-x-3 pt-2">
+                                    <div className="w-3 h-3 bg-white/80 rounded-full animate-dot-pulse duration-1000 animate-infinite" />
+                                    <div className="w-3 h-3 bg-white/80 rounded-full animate-dot-pulse duration-1000 animate-infinite delay-200" />
+                                    <div className="w-3 h-3 bg-white/80 rounded-full animate-dot-pulse duration-1000 animate-infinite delay-400" />
+                                </div>
                             </div>
                         ) : (
-                            <div className="flex flex-row justify-center items-center space-x-4">
-                                <img src={waiting} alt="Waiting" className="w-40 h-40 rotate-5" />
+                            <div className="flex flex-row justify-center items-center space-x-4 animate-in slide-in-from-bottom duration-1000 delay-500">
+                                <img src={waiting} alt="Waiting" className="w-40 h-40 animate-rocking duration-2000 animate-infinite" />
                                 <div className="flex flex-col justify-center items-center space-y-2">
-                                    <span className="text-gray-200 text-3xl font-semibold">Waiting for others to join...</span>
-                                    <span className="text-gray-200 text-md font-medium">Owner can start the session at any time.</span>
+                                    <span className="text-gray-200 text-xl sm:text-3xl font-semibold">Waiting for others to join</span>
+                                    <span className="text-gray-200 text-xs sm:text-md font-medium">Owner can start the session at any time.</span>
+                                    <div className="flex flex-row justify-center items-center space-x-3 pt-2">
+                                        <div className="w-3 h-3 bg-white/80 rounded-full animate-dot-pulse duration-1000 animate-infinite" />
+                                        <div className="w-3 h-3 bg-white/80 rounded-full animate-dot-pulse duration-1000 animate-infinite delay-200" />
+                                        <div className="w-3 h-3 bg-white/80 rounded-full animate-dot-pulse duration-1000 animate-infinite delay-400" />
+                                    </div>
                                 </div>
                             </div>
                         )}

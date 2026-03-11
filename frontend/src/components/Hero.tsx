@@ -1,9 +1,14 @@
 import { ArrowDownToLine, ChevronDown, ChevronRight, CirclePlus, Download, Undo2 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import Waves from "./Waves";
+import { API_URL } from "../utils/api";
+import SessionMock from "./SessionMock";
 
-export default function Hero() {
+interface HeroProps {
+    scrollContainerRef?: React.RefObject<HTMLDivElement | null>;
+}
+
+export default function Hero({ scrollContainerRef }: HeroProps) {
     const [typewriterText, setTypewriterText] = useState("");
     const [currentStringIndex, setCurrentStringIndex] = useState(0);
     const [isDeleting, setIsDeleting] = useState(false);
@@ -42,7 +47,7 @@ export default function Hero() {
 
     async function getPreviousSessionsFiles()
     {
-        const res = await fetch("http://localhost:5000/getPreviousSessionFiles",
+        const res = await fetch(`${API_URL}/getPreviousSessionFiles`,
         {
             method: "POST",
             credentials: "include",
@@ -81,7 +86,7 @@ export default function Hero() {
     {
         try
         {
-            const res = await fetch("http://localhost:5000/create",
+            const res = await fetch(`${API_URL}/create`,
             {
                 method: "POST",
                 credentials: "include",
@@ -106,7 +111,7 @@ export default function Hero() {
     {
         try
         {
-            const res  = await fetch("http://localhost:5000/preJoin",
+            const res  = await fetch(`${API_URL}/preJoin`,
             {
                 method: "POST",
                 credentials: "include",
@@ -134,15 +139,16 @@ export default function Hero() {
     }
 
     useEffect(() => {
-        function handleScroll()
-        {
-            setScrollY(window.scrollY);
+        const el = scrollContainerRef?.current ?? window;
+        function handleScroll() {
+            const scrollTop = el === window ? window.scrollY : (el as HTMLDivElement).scrollTop;
+            setScrollY(scrollTop);
         }
 
-        window.addEventListener("scroll", handleScroll);
-        handleScroll(); // Initial check
+        el.addEventListener("scroll", handleScroll);
+        handleScroll();
 
-        return () => window.removeEventListener("scroll", handleScroll);
+        return () => el.removeEventListener("scroll", handleScroll);
     }, []);
 
     useEffect(() => {
@@ -178,14 +184,14 @@ export default function Hero() {
 
     return (
         <section className="relative min-h-screen flex items-center justify-center pt-16 sm:pt-20 px-4 sm:px-6 lg:px-8 overflow-hidden"> 
-            <div className="absolute inset-0 z-0 w-full h-full">
-                <Waves />
+            <div className="absolute w-1/2 lg:w-2/5 z-0 left-1/2 flex items-center justify-center max-lg:justify-end max-lg:pr-4">
+                <SessionMock embedded />
             </div>
 
             <div className="max-w-8xl mx-auto text-left relative w-full mb-4 sm:mb-6 leading-tight z-20">
                 <div className= "max-w-8xl mx-auto flex flex-col lg:grid lg:grid-cols-1 text-left gap-2 sm:gap-3 lg:gap-4 items-left relative">
                     {/*big top text*/}
-                    <h1 className="text-6xl sm:text-4xl md:text-5xl lg:text-[8rem] font-semibold flex flex-col text-left">
+                    <h1 className="text-4xl sm:text-4xl md:text-5xl lg:text-[8rem] font-semibold flex flex-col text-left">
                         <span className="bg-gradient-to-r select-none from-indigo-200 via-blue-100 to-cyan-100 bg-clip-text text-transparent block mb-1 sm:mb-2 animate-in slide-in-from-bottom duration-1000 md:leading-tight leading-normal">Synchronize Your</span>
                         <span className="pt-1 sm:pt-8 pb-2 bg-gradient-to-r select-none from-blue-300 via-blue-200 to-cyan-500 bg-clip-text text-transparent inline-block mb-1 sm:mb-2 animate-in slide-in-from-bottom duration-1000 delay-200 space-x-1 leading-relaxed min-h-[1.5em]">
                             {typewriterText}
@@ -193,19 +199,19 @@ export default function Hero() {
                         </span>
                     </h1>
                     {/*description text*/}
-                    <p className="text-md font-semibold sm:text-semibold lg:text-lg text-gray-200 max-w-2xl mb-6 pl-2.5 sm:mb-8 animate-in slide-in-from-bottom duration-1000 delay-400 leading-relaxed text-left -mt-2 sm:-mt-3 lg:-mt-4">
+                    <p className="text-xs sm:text-md w-1/2 md:w-full font-semibold sm:text-semibold lg:text-lg text-gray-200 max-w-2xl mb-6 sm:pl-2.5 sm:mb-8 animate-in slide-in-from-bottom duration-1000 delay-400 leading-relaxed text-left -mt-2 sm:-mt-3 lg:-mt-4">
                         Start collaborating on your audio projects with ClapSync. Record and sync your audio sessions anywhere, anytime.
                     </p>
                     {/*buttons*/}
-                    <div className="flex flex-col sm:flex-row items-center justify-start gap-3 sm:gap-4 mb-8 sm:mb-12 animate-in slide-in-from-bottom duration-1000 delay-600 w-md max-w-lg">
-                        <button onClick={createSession} className="group w-full sm:flex-1 px-6 sm:px-8 py-3 sm:py-4 bg-gradient-to-b from-slate-800/50 to-blue-700 rounded-lg font-semibold text-sm sm:text-base transition-all duration-600 hover:scale-102 flex items-center justify-center space-x-2">   
+                    <div className="flex flex-col md:flex-row items-start justify-start gap-3 sm:gap-4 mb-8 sm:mb-12 animate-in slide-in-from-bottom duration-1000 delay-600 w-md max-w-lg">
+                        <button onClick={createSession} className="group w-1/2 md:w-full sm:flex-1 px-6 sm:px-8 py-3 sm:py-4 bg-gradient-to-tr from-blue-800 via-indigo-850 via-30% to-sky-800 hover:from-blue-700 hover:to-sky-700 text-slate-50 rounded-lg font-semibold text-sm sm:text-base transition-all duration-300 hover:scale-[1.02] flex items-center justify-center space-x-2 shadow-md shadow-slate-900/40">   
                             <span> Create a Session </span>
-                            <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5 group-hover:translate-x-1 transition-transform duration-300"/>
+                            <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5 group-hover:translate-x-1 transition-transform duration-300 pt-1"/>
                         </button>
 
-                        <button onClick={joinSession} className="group w-full sm:flex-1 px-6 sm:px-8 py-3 sm:py-4 bg-gradient-to-b from-slate-800/50 to-blue-700 rounded-lg font-bold text-sm sm:text-base transition-all duration-600 hover:scale-102 flex items-center justify-center space-x-2">   
+                        <button onClick={joinSession} className="group w-1/2 md:w-full sm:flex-1 px-6 sm:px-8 py-3 sm:py-4 bg-gradient-to-tl from-blue-800 via-indigo-850 via-30% to-sky-800 hover:from-blue-700 hover:to-sky-700 text-slate-50 rounded-lg font-bold text-sm sm:text-base transition-all duration-300 hover:scale-[1.02] flex items-center justify-center space-x-2 shadow-md shadow-slate-900/40">   
                             <span> Join a Session </span>
-                            <CirclePlus className="w-4 h-4 sm:w-5 sm:h-5 group-hover:scale-110 duration-300"/>
+                            <CirclePlus className="w-4 h-4 sm:w-5 sm:h-5 group-hover:scale-110 duration-300 pt-1"/>
                         </button>
                     </div>
                 </div>

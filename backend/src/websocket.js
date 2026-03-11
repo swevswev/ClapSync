@@ -1,8 +1,8 @@
 import { WebSocketServer } from "ws";
 import { parse } from "url";
 import cookie from "cookie";
-import { getUserNameFromSession, getUserSession } from "./userSessions.js";
-import { getAudioSession, removeFromAudioSession, getOwner, joinAudioSession } from "./audioSessionManager.js";
+import { getUserSession } from "./userSessions.js";
+import { getAudioSession, removeFromAudioSession, getOwner, joinAudioSession, getSessionIdFromUser } from "./audioSessionManager.js";
 import { getUser, getUserName } from "./accountManager.js";
 import {v4 as uuidv4} from "uuid";
 
@@ -11,10 +11,20 @@ export const activeSessions = new Map();
 const recordingBuffer = 5000 //5 secs
 const MIC_LEVEL_BROADCAST_INTERVAL = 200; 
 
+/**
+ * Configure and attach a WebSocket server to an existing HTTP server.
+ * @param {import("http").Server} server
+ */
 export function setupWebSocket(server) 
 {
   const wss = new WebSocketServer({ noServer: true });
 
+  /**
+   * Resolve the userId for a given WebSocket from sessionData.
+   * @param {any} sessionData
+   * @param {import("ws").WebSocket} ws
+   * @returns {string|null}
+   */
   function getUserIdFromSocket(sessionData, ws) {
     for (const [uid, socket] of sessionData.sockets.entries()) {
       if (socket === ws) return uid;
@@ -22,6 +32,23 @@ export function setupWebSocket(server)
     return null;
   }
 
+  /**
+   * Resolve {userId, localId} for a given WebSocket.
+   * @param {any} sessionData
+   * @param {import("ws").WebSocket} ws
+   * @returns {{userId: string|null, localId: string|null}}
+   */
+  function getUserFromSocket(sessionData, ws) {
+    const userId = getUserIdFromSocket(sessionData, ws);
+    if (!userId) return { userId: null, localId: null };
+    const userData = sessionData.users.get(userId);
+    return { userId, localId: userData?.localId ?? null };
+  }
+
+  /**
+   * Server time in ms used for client sync/pings.
+   * @returns {number}
+   */
   function serverNowMs()
   {
     // Use Date.now() directly for consistency with client-side time
@@ -47,10 +74,9 @@ export function setupWebSocket(server)
       const audioSessionId = match[1];
       const cookies = cookie.parse(req.headers.cookie || "");
       const userSessionId = cookies["usid"];
-      
+
       if (!userSessionId || !audioSessionId)
       {
-        console.warn("NO SESSION COOKIE/SESSION ID", { userSessionId: !!userSessionId, audioSessionId: !!audioSessionId });
         socket.destroy();
         return;
       }
@@ -58,7 +84,6 @@ export function setupWebSocket(server)
       const userSession = await(getUserSession(userSessionId));
       if (!userSession || !userSession.Item)
       {
-        console.warn("INVALID SESSION COOKIE", { userSessionId, userSession: !!userSession });
         socket.destroy();
         return;
       }
@@ -66,10 +91,6 @@ export function setupWebSocket(server)
       const userId = await(getUser(userSessionId));
       if (!userId)
       {
-        console.warn("Error getting user from session - user may not be logged in", { 
-          userSessionId, 
-          userSessionItem: userSession.Item 
-        });
         socket.destroy();
         return;
       }
@@ -77,7 +98,6 @@ export function setupWebSocket(server)
       const audioSession = await(getAudioSession(audioSessionId));
       if (!audioSession || !audioSession.Item)
       {
-        console.warn("INVALID AUDIO SESSION ID", { audioSessionId, audioSession: !!audioSession });
         socket.destroy();
         return;
       }
@@ -202,63 +222,31 @@ export function setupWebSocket(server)
 
     micLevel: (data, ws, sessionData) =>
     {
-      // Find the userId from the socket, then get localId
-      let userId = null;
-      for (const [uid, socket] of sessionData.sockets.entries()) {
-        if (socket === ws) {
-          userId = uid;
-          break;
-        }
-      }
-      
-      if (!userId) return;
-      
-      // Get user data which contains localId
-      const userData = sessionData.users.get(userId);
-      if (userData && userData.localId) {
-        sessionData.micLevels.set(userData.localId, data.level || 0);
+      const { localId } = getUserFromSocket(sessionData, ws);
+      if (localId) {
+        sessionData.micLevels.set(localId, data.level || 0);
         broadcastMicLevels(sessionData);
       }
     },
 
     pingUpdate: (data, ws, sessionData) =>
     {
-      let userId = null;
-      for (const [uid, socket] of sessionData.sockets.entries()) {
-        if (socket === ws) {
-          userId = uid;
-          break;
-        }
-      }
-      
-      if (!userId) return;
-
-      const userData = sessionData.users.get(userId);
-      if (userData && userData.localId) 
+      const { localId } = getUserFromSocket(sessionData, ws);
+      if (localId) 
       {
         const numericDelay = Number(data.delay);
-        sessionData.pingDelays.set(userData.localId, Number.isFinite(numericDelay) ? numericDelay : 0);
+        sessionData.pingDelays.set(localId, Number.isFinite(numericDelay) ? numericDelay : 0);
         broadcastPingDelays(sessionData);
       }
     },
 
     mute: (data, ws, sessionData) =>
     {
-      let userId = null;
-      for (const [uid, socket] of sessionData.sockets.entries()) {
-        if (socket === ws) {
-          userId = uid;
-          break;
-        }
-      }
-
-      if (!userId) return;
-
       const muted = data.muted;
-      const userData = sessionData.users.get(userId);
-      if (userData && userData.localId)
+      const { localId } = getUserFromSocket(sessionData, ws);
+      if (localId)
       {
-        sessionData.mutedUsers.set(userData.localId, muted);
+        sessionData.mutedUsers.set(localId, muted);
         // Broadcast muted users update to all clients
         broadcastMutedUsers(sessionData);
       }
@@ -355,8 +343,23 @@ export function setupWebSocket(server)
 
     
     const sessionData = activeSessions.get(audioSessionId);
+    const existingSessionId = await getSessionIdFromUser(userId);
+    if(existingSessionId != null && existingSessionId != audioSessionId)
+    {
+      await removeFromAudioSession(userId, "Session Changed");
+    }
+
+
+    // Check if user already has an active connection
+    const existingSocket = sessionData.sockets.get(userId);
+    if (existingSocket && existingSocket !== ws) {
+      ws.close(1008, "Already in session");
+      return; 
+    }
+    
     let joined = false;
 
+    
     
     try {
         joined = await joinAudioSession(userId, audioSessionId);
@@ -369,23 +372,12 @@ export function setupWebSocket(server)
     if(!joined)
     {
       ws.close(1008, "Failed to join session");
-      console.error("Failed to join session during WebSocket connection:", err);
       return;
     }
-    
+
     let localId;
     let userName;
-    
-    // Check if user already has an active connection
-    const existingSocket = sessionData.sockets.get(userId);
-    if (existingSocket && existingSocket !== ws) {
-      // Remove event listeners from old socket to prevent disconnect handler from firing
-      existingSocket.removeAllListeners();
-      // Close the old socket (0 = CONNECTING, 1 = OPEN)
-      if (existingSocket.readyState === 0 || existingSocket.readyState === 1) {
-        existingSocket.close(1000, "Replaced by new connection");
-      }
-    }
+  
     
     if(!sessionData.users.has(userId))
     {
@@ -459,7 +451,7 @@ export function setupWebSocket(server)
       if(handleMessage[type])
         handleMessage[type](data, ws, sessionData, userSessionId);
       else
-        console.warn("Unknown message type: ", type);
+        console.warn("Unknown WebSocket message type:", type);
     });
 
     ws.on("close", async () => {
